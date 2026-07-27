@@ -1,9 +1,9 @@
 import polars as pl
 from typing import Optional
-from ctm_client import CTMClient
-from read_DSH_files import read_all_scenario_sheets
-from utils import fix_string
-from ctm_constants import (
+from .ctm_client import CTMClient
+from .read_DSH_files import read_all_scenario_sheets
+from .utils import fix_string
+from .ctm_constants import (
     CTM_ENERGY_COLUMN_MAP,
     get_valid_ctm_inputs,
     get_valid_ctm_inputs_bottom_up,

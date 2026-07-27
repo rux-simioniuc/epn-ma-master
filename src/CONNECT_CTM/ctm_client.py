@@ -1,5 +1,5 @@
 import requests
-from ctm_constants import CLUSTERS
+from .ctm_constants import CLUSTERS
 
 # ── Config ─────────────────────────────────────────────────────────────────
 CTM_LIVE = "https://carbontransitionmodel.com/api/"

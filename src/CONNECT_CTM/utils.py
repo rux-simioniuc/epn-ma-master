@@ -1,7 +1,7 @@
 import polars as pl
 from pathlib import Path
-from constants import SCENARIO_YEARS
-from ctm_client import CTMClient
+from .constants import SCENARIO_YEARS
+from .ctm_client import CTMClient
 # read and transform mapping excel
 
 

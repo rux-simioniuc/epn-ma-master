@@ -12,16 +12,16 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 import tempfile
 
-from ctm_client import CTMClient
-from read_DSH_files import read_all_scenario_sheets, read_production_table, read_production_table_curves, read_plant_details
-from utils import read_and_transform_mapping, fix_string, get_final_cluster_sector_curves
-from push_to_ctm import (
+from .ctm_client import CTMClient
+from .read_DSH_files import read_all_scenario_sheets, read_production_table, read_production_table_curves, read_plant_details
+from .utils import read_and_transform_mapping, fix_string, get_final_cluster_sector_curves
+from .push_to_ctm import (
     construct_site_inputs,
     construct_bottom_up_inputs,
     construct_custom_site_inputs,
 )
-from constants import SCENARIO_YEARS, REFERENCE_YEAR, EMISSION_COLS_ORDER, UTILITY_COLS_ORDER    
-from ctm_constants import SECTORS, CLUSTERS, ALL_SCENARIOS
+from .constants import SCENARIO_YEARS, REFERENCE_YEAR, EMISSION_COLS_ORDER, UTILITY_COLS_ORDER    
+from .ctm_constants import SECTORS, CLUSTERS, ALL_SCENARIOS
 
 
 def get_custom_ctm_inputs() -> Dict:

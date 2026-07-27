@@ -1,5 +1,5 @@
-from ctm_client import CTMClient
-from constants import SCENARIO_YEARS, ALL_SCENARIOS
+from .ctm_client import CTMClient
+from .constants import SCENARIO_YEARS, ALL_SCENARIOS
 import json
 
 # CTM_session_ids = {
