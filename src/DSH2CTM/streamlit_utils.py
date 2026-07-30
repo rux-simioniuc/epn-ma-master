@@ -4,7 +4,7 @@ import io
 from openpyxl import Workbook, load_workbook
 import tempfile
 from pathlib import Path
-from.constants import REFERENCE_YEAR
+from .constants import REFERENCE_YEAR
 from .utils import (parse_All_EANs, 
                     get_plant_name, 
                     get_all_units, 
