@@ -1,5 +1,6 @@
-from .ctm_client import CTMClient
-from .constants import SCENARIO_YEARS, ALL_SCENARIOS
+from ctm_client import CTMClient
+from utils import push_ctm_scenario_to_etm
+from constants import SCENARIO_YEARS, ALL_SCENARIOS
 import json
 
 # CTM_session_ids = {
@@ -93,7 +94,8 @@ ETM_session_ids = {
 
 etm_test_session = '1463394'
 
-token = 'etm_eyJraWQiOiJkODI5ZTk3YTU4ZDhhOTQyYjg3NGI5ZjNiZWI3ZDJlNGY0MTA5ZjIzNWE0Y2NhMDkzYmU5MzFiMzY1NTlkNGI2IiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiJodHRwczovL215LmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20iLCJpYXQiOjE3ODI1MDQ2ODQsImF1ZCI6Imh0dHBzOi8vZW5naW5lLmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20gaHR0cHM6Ly8yMDI1LTAxLmVuZ2luZS5lbmVyZ3l0cmFuc2l0aW9ubW9kZWwuY29tIiwic2NvcGVzIjoib3BlbmlkIHB1YmxpYyBzY2VuYXJpb3M6cmVhZCBzY2VuYXJpb3M6d3JpdGUiLCJqdGkiOiI2YmZjOWZkOS1iMTA4LTQzZDgtYTcxMi0yOGZmZDVmMjkyNzkiLCJzdWIiOjE2NzQwLCJ1c2VyIjp7ImlkIjoxNjc0MCwiYWRtaW4iOmZhbHNlLCJlbWFpbCI6InJ1eGFuZHJhLnNpbWlvbml1YzIyQGdtYWlsLmNvbSIsIm5hbWUiOiJSdXhhbmRyYSAifSwiZXhwIjoxNzkwMjgwNjg0fQ.R5HchFBEO-jB-yhCZHrDvA2duO5487uX8uErARnm0sFVWzLyBoLJxdce9Ikm7g7qrsickGnHAiT92jWf7dDBq-4nzXq84680siD3tVeE3MN5T5QihTxEtLtzg_XOTxGsyalwNWOJpfMSQKYw8_Db4pqBDfGphYA6JoipiBco-r0lnk1a0puKKhZzERsXf6taEnQsuW0v0cJpyp9yhzXuC8gYhzKtkX4PlIY96rT3KiGMnti78FkXcbfCqiNdeLFG6cTS7dz0AB4s-SxwDRlvlXL7nse-QNxb1mfvUMAR83vcs8EWww9isKG97m6QBgh3GNMP9BCYDTis0GnD9B30uQ'
+# token = 'etm_eyJraWQiOiJkODI5ZTk3YTU4ZDhhOTQyYjg3NGI5ZjNiZWI3ZDJlNGY0MTA5ZjIzNWE0Y2NhMDkzYmU5MzFiMzY1NTlkNGI2IiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiJodHRwczovL215LmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20iLCJpYXQiOjE3ODI1MDQ2ODQsImF1ZCI6Imh0dHBzOi8vZW5naW5lLmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20gaHR0cHM6Ly8yMDI1LTAxLmVuZ2luZS5lbmVyZ3l0cmFuc2l0aW9ubW9kZWwuY29tIiwic2NvcGVzIjoib3BlbmlkIHB1YmxpYyBzY2VuYXJpb3M6cmVhZCBzY2VuYXJpb3M6d3JpdGUiLCJqdGkiOiI2YmZjOWZkOS1iMTA4LTQzZDgtYTcxMi0yOGZmZDVmMjkyNzkiLCJzdWIiOjE2NzQwLCJ1c2VyIjp7ImlkIjoxNjc0MCwiYWRtaW4iOmZhbHNlLCJlbWFpbCI6InJ1eGFuZHJhLnNpbWlvbml1YzIyQGdtYWlsLmNvbSIsIm5hbWUiOiJSdXhhbmRyYSAifSwiZXhwIjoxNzkwMjgwNjg0fQ.R5HchFBEO-jB-yhCZHrDvA2duO5487uX8uErARnm0sFVWzLyBoLJxdce9Ikm7g7qrsickGnHAiT92jWf7dDBq-4nzXq84680siD3tVeE3MN5T5QihTxEtLtzg_XOTxGsyalwNWOJpfMSQKYw8_Db4pqBDfGphYA6JoipiBco-r0lnk1a0puKKhZzERsXf6taEnQsuW0v0cJpyp9yhzXuC8gYhzKtkX4PlIY96rT3KiGMnti78FkXcbfCqiNdeLFG6cTS7dz0AB4s-SxwDRlvlXL7nse-QNxb1mfvUMAR83vcs8EWww9isKG97m6QBgh3GNMP9BCYDTis0GnD9B30uQ'
+token = 'etm_eyJraWQiOiJkODI5ZTk3YTU4ZDhhOTQyYjg3NGI5ZjNiZWI3ZDJlNGY0MTA5ZjIzNWE0Y2NhMDkzYmU5MzFiMzY1NTlkNGI2IiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiJodHRwczovL215LmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20iLCJpYXQiOjE3ODUzMTI5NDUsImF1ZCI6Imh0dHBzOi8vZW5naW5lLmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20gaHR0cHM6Ly8yMDI1LTAxLmVuZ2luZS5lbmVyZ3l0cmFuc2l0aW9ubW9kZWwuY29tIiwic2NvcGVzIjoib3BlbmlkIHB1YmxpYyBzY2VuYXJpb3M6cmVhZCBzY2VuYXJpb3M6d3JpdGUiLCJqdGkiOiJjMjZkZWI5Zi05YTM3LTQ3OWQtYjUxYy0zZDM3M2Q3YjE4NmUiLCJzdWIiOjE2NzcyLCJ1c2VyIjp7ImlkIjoxNjc3MiwiYWRtaW4iOmZhbHNlLCJlbWFpbCI6InJ1eGFuZHJhLnNpbWlvbml1Y0B0ZW5uZXQuZXUiLCJuYW1lIjoiUnV4In0sImV4cCI6MTc4NzkwNDk0NX0.tpO0EXw7tFiRrySA3V9HPTw6EDEd2g7RCydM6VOTg2E3LLE3jq9dxRUziz6nZnFAQS_5DJniSAoABbePtDkY9qKOd-vmUTJEyM63COxUxlaJ5Q8NmISJNXVYnj-vsqcjXVO64CzByCx6WVUE9VJh2Gp228hehjjE_HzpLXvonFGQY3pNV92RnFw4rhJAwCE2uWs8_sn1r2Fs9lrAQXNeWKbTUjArmOTMYM-F1ZoqDjnCsdIeEhoKRMI1aNZqauDjH6eSSjy4ltK7dRivwRew0OO8bzfqd7QW6yyZjbhBEH6WzLICwZVQO1zOoH-sxYgmwwenFOYo218fifLZWH8UHg'
 emmanuel_token = 'etm_eyJraWQiOiJkODI5ZTk3YTU4ZDhhOTQyYjg3NGI5ZjNiZWI3ZDJlNGY0MTA5ZjIzNWE0Y2NhMDkzYmU5MzFiMzY1NTlkNGI2IiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiJodHRwczovL215LmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20iLCJpYXQiOjE3ODI1NTU5ODksImF1ZCI6Imh0dHBzOi8vZW5naW5lLmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20gaHR0cHM6Ly8yMDI1LTAxLmVuZ2luZS5lbmVyZ3l0cmFuc2l0aW9ubW9kZWwuY29tIiwic2NvcGVzIjoib3BlbmlkIHB1YmxpYyBzY2VuYXJpb3M6cmVhZCBzY2VuYXJpb3M6d3JpdGUiLCJqdGkiOiIyZjY0NGJkMy1kMDI3LTRlNWEtYTQ1YS1mOGZkYTQzMzU1ZjciLCJzdWIiOjExNjYxLCJ1c2VyIjp7ImlkIjoxMTY2MSwiYWRtaW4iOmZhbHNlLCJlbWFpbCI6Im5ibmxzY2VuYXJpb3MudGFza2ZvcmNlc0BnbWFpbC5jb20iLCJuYW1lIjoiTkJOTCBTY2VuYXJpb3MgKFRhc2tmb3JjZXMpIn0sImV4cCI6MTgxNDA5MTk4OX0.Z2CDH5-5A76h239qY_tLXnXdAugKjzLdJoAvmRXiO8tUhm5BhyYxtvqKqj4oDMw40QV5G8DsVdczrUp-bJfzGLfft4gcbVCR3BTvRtOaazp_1C88-dwSF4diT0WbNilvHe4_7IH32E7QWjlsMd5EIN07i9bHD6lmozI6n7G7FEmSIddO1mKLcr4H16nnl8BE8sz-jXGZ9nqSon31h2ouxyWea3BlRN6Qp5ElMjoLAHnriQ1oMIuLZusCyGgc3xesLfpHKr5PUZhrqZmW2SCnw7m2p105CvB0ucKVwJi2AfKhDXwwul6VAZS5lBaSp7sj7EZQ-Ggc7vgPjI-5Xt8O2w'
 
 ctm_session_id = "SE-89f8540c58b9fc6a"
@@ -102,33 +104,33 @@ year = '2030'
 
 
 
-def push_ctm_scenario_to_etm(ctm_session:str, etm_session:str, etm_token:str):
-    try:
-        ctm = CTMClient(use_beta=True)
-        ctm.load_session(session_id=ctm_session)
-    except:
-        print('Err loading the CTM session')
+# def push_ctm_scenario_to_etm(ctm_session:str, etm_session:str, etm_token:str):
+#     try:
+#         ctm = CTMClient(use_beta=True)
+#         ctm.load_session(session_id=ctm_session)
+#     except:
+#         print('Err loading the CTM session')
 
-    # Try coupling immediately (empty session)
-    try:
-        etm_result = ctm.couple_etm(
-            auth_token=etm_token,
-            etm_session_id=etm_session
-        )
-        print('Pushed CTM session to ETM')
-        return etm_result
-    except Exception as e: 
-        print(f'Err pushing to ETM: {e}')  
+#     # Try coupling immediately (empty session)
+#     try:
+#         etm_result = ctm.couple_etm(
+#             auth_token=etm_token,
+#             etm_session_id=etm_session
+#         )
+#         print('Pushed CTM session to ETM')
+#         return etm_result
+#     except Exception as e: 
+#         print(f'Err pushing to ETM: {e}')  
 
 
-save_path = "/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/etm_push_22_07"
+save_path = "/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/etm_push_29_07"
 failed = []
 
 for scenario in ALL_SCENARIOS:
     for year in SCENARIO_YEARS:
         ctm_session = CTM_session_ids[(scenario, year)]
         etm_session = ETM_session_ids[(scenario, year)]
-        # if ctm_session in ['SE-f36b215869cf13c7']:
+        # if ctm_session in ['SE-16fa5e5a751cdb47']:
         try:
             # etm_result = push_ctm_scenario_to_etm(ctm_session_id, etm_test_session, token)
             print(f'Loading and pushing {scenario}, {year}: {ctm_session}')
@@ -150,17 +152,20 @@ print('D O N E')
 # scenario = 'Elektrificatie'
 # year = '2035'
 
-# ctm_session = CTM_session_ids[(scenario, year)]
+# ctm_session = CTM_session_ids[('Midden', '2030')]
 # etm_session = ETM_session_ids[(scenario, year)]
+# etm_session = '1472276'
+# ctm_session = "SE-ffa162d5308c29bf"
+# etm_session = '1472296'
 # try:
 #     # etm_result = push_ctm_scenario_to_etm(ctm_session_id, etm_test_session, token)
-#     etm_result = push_ctm_scenario_to_etm(ctm_session, etm_session, emmanuel_token)
+#     etm_result = push_ctm_scenario_to_etm(ctm_session, etm_session, token)
 
-#     print(f'Success for {scenario}, {year}')
+#     # print(f'Success for {scenario}, {year}')
 
-#     inputs_file = f'{save_path}/etmresult_{scenario}_{year}_test.json'
-#     with open(inputs_file, "w") as f:
-#             json.dump(etm_result, f, indent=4)
+#     # inputs_file = f'{save_path}/etmresult_{scenario}_{year}_test.json'
+#     # with open(inputs_file, "w") as f:
+#     #         json.dump(etm_result, f, indent=4)
 #     print()
 # except Exception as e:
 #     print(f'Error for {scenario}, {year}: {e}')

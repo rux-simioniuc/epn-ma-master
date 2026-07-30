@@ -11,6 +11,8 @@ import zipfile
 import io
 import polars as pl
 import pandas as pd
+import ast
+import copy
 
 import sys
 from pathlib import Path
@@ -22,6 +24,7 @@ sys.path.insert(0, str(src_path))
 
 # from DSH2CTM.main import read_csv
 from DSH2CTM.streamlit_utils import *
+from CONNECT_CTM.utils import push_ctm_scenario_to_etm
 
 
 # ── Page config ────────────────────────────────────────────────────────
@@ -66,14 +69,14 @@ with st.sidebar.expander("ETM Settings", expanded=False):
         st.session_state.etm_token = etm_token
         st.success("Token cached")
     
-    etm_scenario = st.text_input(
-        "ETM Scenario ID",
-        value=st.session_state.etm_scenario_id,
-        key="etm_scenario_input",
-    )
-    if etm_scenario:
-        st.session_state.etm_scenario_id = etm_scenario
-        st.success("Scenario ID cached")
+    # etm_scenario = st.text_input(
+    #     "ETM Scenario ID",
+    #     value=st.session_state.etm_scenario_id,
+    #     key="etm_scenario_input",
+    # )
+    # if etm_scenario:
+    #     st.session_state.etm_scenario_id = etm_scenario
+    #     st.success("Scenario ID cached")
 
 
 # ── Main tabs ──────────────────────────────────────────────────────────
@@ -157,9 +160,7 @@ with tab1:
                 (plant_export, reference_emissions, reference_utility,
                  forecast_emission, forecast_utility, project_emission,
                  project_utility, production, flexibility, storage) = files.values()
-                
-                # print(plant_export)
-               
+                               
         else:
             st.info("No files uploaded yet")
             expand_all = True
@@ -214,7 +215,7 @@ with tab1:
 
         with st.expander("Step 2: Upload Forecast Files", expanded=expand_all):
             col1, col2= st.columns(2)
-            
+
             with col1:
                 st.markdown("### Emission forecast")
                 forecast_emission = st.file_uploader(
@@ -329,7 +330,7 @@ with tab1:
                 selected_plants = st.multiselect(
                     "Select plants to process",
                     options=plant_list,
-                    default=plant_list[:min(5, len(plant_list))],
+                    default=plant_list,
                 )
                 if selected_plants:
                     st.info(f"Processing {len(selected_plants)} selected plants")
@@ -438,48 +439,7 @@ with tab1:
 # ════════════════════════════════════════════════════════════════════════
 
 with tab2:
-    st.markdown("## CTM Session Management & ETM Coupling")
-    
-    # ── Step 1: Upload files ───────────────────────────────────────────
-    with st.expander("Step 1: Upload Data Files", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("### Plant Workbooks")
-            plant_files = st.file_uploader(
-                "Upload plant Excel files",
-                type=["xlsx"],
-                accept_multiple_files=True,
-                key="plant_files",
-            )
-            if plant_files:
-                st.success(f"✓ {len(plant_files)} files uploaded")
-                # print(plant_files)
-        
-        with col2:
-            st.markdown("### Mapping File")
-            mapping_file = st.file_uploader(
-                "Upload cluster curves",
-                type=["csv", "xlsx"],
-                key="mapping_file",
-                accept_multiple_files=False
-                        )
-            if mapping_file:
-                st.success("✓ Mapping loaded")
-        
-        with col3:
-            st.markdown("### Cluster/Sector Curves")
-            curves_file = st.file_uploader(
-                "Upload cluster curves",
-                type=["csv", "xlsx"],
-                key="curves_file",
-                accept_multiple_files=False
-            )
-            if curves_file:
-                st.success("✓ Curves loaded")
 
-    # ── Step 2: Session options ────────────────────────────────────────
-    # mapping, main_curves_df, production_curves_df = None, None, None
     if "mapping" not in st.session_state:
         st.session_state.mapping = None
     if 'main_curves_df' not in st.session_state:
@@ -495,39 +455,36 @@ with tab2:
     if 'session_json' not in st.session_state:
                 st.session_state.session_json = None
 
-    with st.expander("Step 2: Settings", expanded=False):
-        col1, col2 = st.columns(2)
+    st.markdown("## CTM Session Management & ETM Coupling")
+    with st.expander("Instructions and Details", expanded=True):
+        st.markdown("##### File formats")
+        
+    
+    # ── Step 1: Upload files ───────────────────────────────────────────
+    with st.expander("Step 1: Upload Data Files", expanded=False):
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            with st.container(border=True):
-                ref_year = st.text_input('Reference year', value = '2024', width=200)
-                scenario_yrs = st.text_input('Scenario years', value = '2030, 2035, 2040, 2050', width=200)
-                
-                scenario_years = scenario_yrs.strip(' ').split(',')
-            
-            with st.container(border=True):
-                col3, col4 = st.columns(2)
-                with col3:
-                    st.text('Cluster/Sector settings')
-                    curve_sheet = st.text_input('Cluster/Sector curve sheet name', value='resultaat', width=200)
-                    production_sheet = st.text_input('Production sheet name', value='wkk rest', width=200)
-                with col4:
-                    if st.button('Load and process cluster/sector curves file', type='primary'):
-
-                        if curves_file:
-                            try:
-                                st.session_state.main_curves_df = pl.read_excel(curves_file, sheet_name=curve_sheet)
-                                st.session_state.production_curves_df = pl.read_excel(curves_file, sheet_name=production_sheet)
-                                st.success('Curves processed successfully')
-                            except Exception as e:
-                                st.error(f'Error loading and processing curve file: {e}')
-
-                        else:
-                            st.error('No curve file uploaded')
-
+            st.markdown("### Plant Workbooks")
+            plant_files = st.file_uploader(
+                "Upload plant Excel files",
+                type=["xlsx"],
+                accept_multiple_files=True,
+                key="plant_files",
+            )
+            if plant_files:
+                st.success(f"✓ {len(plant_files)} files uploaded")                      
         with col2:
-            if st.button('Load and process mapping file', type='primary'):
-                if mapping_file is not None:
+            st.markdown("### Mapping File")
+            mapping_file = st.file_uploader(
+                "Upload DSH to CTM mapping file",
+                type=["csv", "xlsx"],
+                key="mapping_file",
+                accept_multiple_files=False
+                        )
+            st.write('*Use the pre-processed csv mapping file when possible. The file is avl for download after uploading the excel.*')
+            if mapping_file:
+                if st.button('Load and process mapping file', type='primary'):
                     try:
                         from CONNECT_CTM.utils import read_and_transform_mapping, normalize_sector_cluster_mapping
 
@@ -537,53 +494,131 @@ with tab2:
                         else:
                             import polars as pl
                             st.session_state.mapping = pl.read_excel(mapping_file)
-                            
+                                                        
                             st.session_state.mapping = read_and_transform_mapping(
-                                excel_path='',
+                                excel_path=None,
                                 mapping_df=st.session_state.mapping,
                                 save_file=False,
                                 normalize_sector_cluster=True
                             )
                         st.success('Mapping processed successfully')
                         # st.session_state.push_logs.append('Mapping processed successfully')
+                        if mapping_file.name.split('.')[-1] == 'xlsx':
+                            st.download_button(
+                                label=f"Download mapping.csv",
+                                data=st.session_state.mapping.write_csv().encode('utf-8'),
+                                file_name='mapping.csv',
+                                mime="text/csv",
+                            )
                     except Exception as e:
                         st.error(f'Error loading and processing mapping file: {e}')
-                else:
-                    st.error('No mapping file uploaded')
+        
+        with col3:
+            st.markdown("### Cluster/Sector Curves")
+            curves_file = st.file_uploader(
+                "Upload cluster curves",
+                type=["xlsx"],
+                key="curves_file",
+                accept_multiple_files=False
+            )
+            if curves_file:
+                col31, col32 = st.columns(2)
+                with col31:
+                    curve_sheet = st.text_input('Cluster/Sector sheet name', value='resultaat', width=200)
+                with col32:
+                    production_sheet = st.text_input('Production sheet name', value='wkk rest', width=200)
 
-            
-    # use_beta, session_json = None, None
+                if st.button('Load and process cluster/sector curves file', type='primary'):
+                    try:
+                        st.session_state.main_curves_df = pl.read_excel(curves_file, sheet_name=curve_sheet)
+                        st.session_state.production_curves_df = pl.read_excel(curves_file, sheet_name=production_sheet)
+                        st.success('Curves processed successfully')
+                    except Exception as e:
+                        st.error(f'Error loading and processing curve file: {e}')
+
     # ── Step 2: Session options ────────────────────────────────────────
-    with st.expander("Step 2: CTM Options", expanded=False):
+
+    with st.expander("Step 2: Settings", expanded=False):
         col1, col2 = st.columns(2)
         
+        with col2:
+            with st.container(border=True):
+
+                if plant_files:
+                    example_file = copy.copy(plant_files[0])
+                    (scenarios, years) = extract_scenario_years(example_file)
+                    ref_year = years[0]
+                    years = years[1:]
+                else:
+                    scenarios, years, ref_year = [], [], ''
+
+
+                ref_year = st.text_input('Reference year', value = ref_year, width=200)
+                scenario_yrs = st.text_input('Scenario years', value = ', '.join(years), width=200)
+                scenario_years = scenario_yrs.replace(' ', '').split(',')
+
+                scenario_names = st.text_input('Scenario names', value = ', '.join(scenarios))
+                scenario_names = scenario_names.strip(' ').split(',')
+                scenario_names = [i.strip(' ') for i in scenario_names]
+
+                st.write('*The years and scenarios are extracted from the uploaded plant excel files. If changed, they might yield errors.*')
+
         with col1:
             st.session_state.use_beta = st.checkbox("Use CTM Beta", value=True)
             create_new = st.checkbox("Create New Sessions", value=True)
 
-        # session_json = None
-        with col2:
             if not create_new:
                 st.markdown("### Load Existing Sessions")
                 st.session_state.session_json = st.text_area(
                     "Paste session IDs (JSON format)",
                     height=150,
-                    help='{("Scenario", "Year"): "SE-xxxxx"}',
+                    help='{("Scenario", "Year"): "SE-xxxxx", \n("Scenario", "Year"): "SE-xxxxx"}',
                 )
-    
-    
+
+                if len(st.session_state.session_json) > 0:
+                    try:
+                        st.session_state.session_json = ast.literal_eval(st.session_state.session_json)
+                    except Exception as e:
+                        st.error(f'Could not process IDs: {e}')
+
     # ── Step 3: Push to CTM ────────────────────────────────────────────
     if "result" not in st.session_state:
         st.session_state.result = None
+    if "selected_scenarios" not in st.session_state:
+            st.session_state.selected_scenarios = None
+    if "selected_years" not in st.session_state:
+            st.session_state.selected_years = None
+
     with st.expander("Step 3: Push to CTM", expanded=False):
         #TODO add some curve + mapping validation here
-        if st.button("Start CTM Push", type="primary"):
+
+        st.session_state.selected_scenarios = st.multiselect(
+                            "Select scenarios",
+                            options=scenario_names,
+                            default=scenario_names,
+                        )
+
+        st.session_state.selected_years = st.multiselect(
+                                    "Select years",
+                                    options=scenario_years,
+                                    default=scenario_years,
+                                )
+
+        if len(st.session_state.selected_scenarios) == 0 or len(st.session_state.selected_years) == 0:
+            st.error('Select at least one year and one scenario to push to CTM.')
+            disabled_button = True 
+        else:
+            disabled_button = False
+
+
+        if st.button("Start CTM Push", type="primary", disabled=disabled_button):
             # st.info("Push process would start here...")
             try:
                 from CONNECT_CTM.push_to_ctm_modules import push_aggregated_by_scenario_year
                 from CONNECT_CTM.constants import EMISSION_COLS_ORDER, UTILITY_COLS_ORDER
                 from CONNECT_CTM.ctm_constants import TRANSFORMATION_OVERRIDES 
                 with st.spinner("Processing..."):
+
                     st.session_state.result = push_aggregated_by_scenario_year(
                         plants_workbook_dir=plant_files,
                         mapping_df=st.session_state.mapping,
@@ -593,14 +628,14 @@ with tab2:
                         cluster_sector_file=st.session_state.main_curves_df,
                         cluster_sector_production=st.session_state.production_curves_df,
                         reuse_sessions=st.session_state.session_json,
-                        #selected_scenarios=['Elektrificatie'],
+                        selected_scenarios=st.session_state.selected_scenarios,
                         use_beta=st.session_state.use_beta,
-                        reference_year=st.session_state.ref_year
+                        reference_year=st.session_state.ref_year,
+                        selected_years=st.session_state.selected_years
                     )
 
-                    print(st.session_state.result)
+                    # print(st.session_state.result)
             except Exception as e:
-                print('here?')
                 st.error(f'Error: {e}')
         
         # Show logs
@@ -631,25 +666,65 @@ with tab2:
             st.warning("⚠️ ETM Scenario ID not set. Add it in the sidebar first.")
         else:
             st.success("✓ Credentials ready")
+
+        st.info('Using ETM LIVE version (#latest)')
         
         col1, col2 = st.columns(2)
         
         with col1:
-            use_beta_etm = st.checkbox("Use CTM Beta for ETM coupling", value=True)
+            st.markdown("### Load Existing Sessions")
+            st.session_state.etm_session_json = st.text_area(
+                "Paste session IDs (JSON format)",
+                height=150,
+                help='{("Scenario", "Year"): "XXXXXXX"}',
+            )
+
+            if len(st.session_state.etm_session_json) > 0:
+                try:
+                    st.session_state.etm_session_json = ast.literal_eval(st.session_state.etm_session_json)
+                    st.success("Session IDs are formatted correctly.")
+                except Exception as e:
+                    st.error(f'Error processing the session IDs: {e}')
+
+
+            # use_beta_etm = st.checkbox("Use CTM Beta for ETM coupling", value=True)
             retry_failed = st.checkbox("Retry failed sessions", value=False)
         
         with col2:
             max_retries = st.slider("Max retries per session", 1, 5, 3)
         
         if st.button("Couple to ETM", type="primary"):
-            if st.session_state.etm_token and st.session_state.etm_scenario_id:
-                st.info("ETM coupling would start here...")
+            st.session_state.push_logs = []
+            if st.session_state.etm_token and st.session_state.etm_session_json:
+
+                st.markdown("### Logs")
+                with st.container(border=True, height=150):
+
+                    for (scenario, year) in st.session_state.session_json.keys():
+                        # for year in []:
+                        ctm_session = st.session_state.session_json[(scenario, year)]
+
+                        etm_session = st.session_state.etm_session_json[(scenario, year)]
+
+                        st.session_state.push_logs.append(f"Pushing {scenario} {year}; CTM {ctm_session} to ETM {etm_session}")
+                        st.text(f"Pushing {scenario} {year}; CTM {ctm_session} to ETM {etm_session}")
+
+                        try:
+                            aux_result = push_ctm_scenario_to_etm(ctm_session, etm_session, st.session_state.etm_token)
+                        except Exception as e:
+                            st.text(f"[ERROR]: {e}")
+                            st.session_state.push_logs.append(f"[ERROR]: {e}")
                 
-                with st.spinner("Coupling sessions to ETM..."):
-                    # Placeholder for actual ETM coupling logic
-                    st.session_state.push_logs.append("Coupling to ETM...")
-                    st.session_state.push_logs.append("✓ 13/20 sessions coupled successfully")
-                    st.session_state.push_logs.append("✗ 7 sessions failed (502 errors)")
+                st.markdown("### Logs")
+                with st.container(border=True, height=150):
+                    for log_line in st.session_state.push_logs:
+                        st.text(log_line)
+
+                # with st.spinner("Coupling sessions to ETM..."):
+                #     # Placeholder for actual ETM coupling logic
+                #     st.session_state.push_logs.append("Coupling to ETM...")
+                #     st.session_state.push_logs.append("✓ 13/20 sessions coupled successfully")
+                #     st.session_state.push_logs.append("✗ 7 sessions failed (502 errors)")
             else:
                 st.error("Missing credentials!")
     

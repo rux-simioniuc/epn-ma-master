@@ -92,12 +92,13 @@ for scen_list in SCENARIOS_iter:
         emission_cols=EMISSION_COLS_ORDER,
         energy_cols=UTILITY_COLS_ORDER,
         transformation_overrides=TRANSFORMATION_OVERRIDES,
-        cluster_sector_file="/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm/input/ctm format curves_new.xlsx",
+        cluster_sector_file="/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm/input/Copy of ctm format curves.xlsx",
+        cluster_sector_curves_sheet_name='resultaat',
         cluster_sector_production_sheet_name='wkk rest',
         reuse_sessions=sessions,
         output_log_file=f'/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/test_log_half{i}.txt',
         selected_scenarios=scen_list,
-        session_path='/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/sessions/24_07'
+        session_path='/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/sessions/27_07'
     )
 
     files = write_push_logs(result, "/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/")

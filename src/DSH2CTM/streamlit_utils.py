@@ -1,7 +1,9 @@
 import polars as pl
 import pandas as pd
 import io
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
+import tempfile
+from pathlib import Path
 from.constants import REFERENCE_YEAR
 from .utils import (parse_All_EANs, 
                     get_plant_name, 
@@ -21,6 +23,8 @@ from .format_emissies_sheet import (write_energy_balance_sheet,
                                     write_projects_sheet, 
                                     write_scenario_sheets, 
                                     write_storage_sheet)
+
+from CONNECT_CTM.read_DSH_files import read_all_scenario_sheets
 
 def read_csv_streamlit(streamlit_file) -> pl.DataFrame:
     """Read a CSV via pandas, falling back to Polars for malformed files."""
@@ -132,16 +136,58 @@ def process_plant_streamlit(
         return None, logs
 
 
-
-
-def process_all_dfs(plant_export:pl.DataFrame,
-                    reference_emissions:pl.DataFrame,
-                    reference_utility:pl.DataFrame,
-                    forecast_emission:pl.DataFrame,
-                    forecast_utility:pl.DataFrame,
-                    project_emission:pl.DataFrame,
-                    project_utility:pl.DataFrame,
-                    production:pl.DataFrame,
-                    flexibility:pl.DataFrame,
-                    storage:pl.DataFrame):
-    pass
+def extract_scenario_years(streamlit_file) -> tuple[list[str], list[str]]:
+    """
+    Extract scenario names and years from uploaded Excel file.
+    
+    Returns:
+        (scenario_names, scenario_years)
+    """
+    # Save to temp
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        tmp.write(streamlit_file.read())
+        tmp.flush()
+        tmp_path = tmp.name
+    
+    try:
+        wb = load_workbook(tmp_path)
+        
+        # Get scenario names from sheet names
+        scenarios = [
+            sheet.replace("Scenario ", "").strip() 
+            for sheet in wb.sheetnames 
+            if sheet.startswith("Scenario")
+        ]
+        
+        # Get years from first scenario sheet
+        if scenarios:
+            ws = wb[f"Scenario {scenarios[0]}"]
+            
+            # Find header row (look for "Year" and "Flow type")
+            header_row = None
+            for row_idx in range(1, min(10, ws.max_row + 1)):
+                year_val = ws.cell(row_idx, 2).value
+                flow_val = ws.cell(row_idx, 3).value
+                
+                if year_val == "Year" and flow_val == "Flow type":
+                    header_row = row_idx
+                    break
+            
+            if header_row is None:
+                header_row = 3
+            
+            # Extract years from column B (year_col = 2)
+            years = set()
+            for row_idx in range(header_row + 1, ws.max_row + 1):
+                year_cell = ws.cell(row_idx, 2).value
+                if year_cell is not None:
+                    years.add(str(year_cell))
+            
+            years = sorted(years)
+        else:
+            years = []
+        
+        return sorted(scenarios), years
+    
+    finally:
+        Path(tmp_path).unlink()

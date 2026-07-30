@@ -231,8 +231,7 @@ def read_all_scenario_sheets(
     """
     Read all Scenario X sheets and return a single dataframe.
     """
- 
-    wb = load_workbook(workbook_path, read_only=True)
+    wb = load_workbook(workbook_path, read_only=True)   
  
     scenario_sheets = [
         sheet
@@ -250,7 +249,7 @@ def read_all_scenario_sheets(
         )
         for sheet in scenario_sheets
     ]
- 
+
     if not dfs:
         return pl.DataFrame()
     

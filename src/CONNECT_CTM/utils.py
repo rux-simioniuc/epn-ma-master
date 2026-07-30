@@ -210,12 +210,13 @@ def read_and_transform_mapping(
 
 def get_aggregated_curves(
         excel_path: str= None,
+        sheet_name: str = 'resultaat',
         curves: pl.DataFrame = None, 
         all_years: list = SCENARIO_YEARS
         ) -> pl.DataFrame:
 
     if excel_path is not None:
-        curves = pl.read_excel(excel_path)
+        curves = pl.read_excel(excel_path, sheet_name=sheet_name)
 
     curves = curves.with_columns(pl.col("Cluster").str.to_lowercase().replace('overig', 'cluster 6').alias('Cluster'))
 
@@ -288,14 +289,31 @@ def reshape_cluster_sector_curves(
 
 def get_final_cluster_sector_curves(
         excel_path: str = None,
+        sheet_name: str = 'resultaat',
         curves_df: pl.DataFrame = None,
         years: list[str] = SCENARIO_YEARS
 ) -> pl.DataFrame:
     
-    init_curves = get_aggregated_curves(excel_path=excel_path, curves=curves_df, all_years=years)
+    init_curves = get_aggregated_curves(excel_path=excel_path, sheet_name=sheet_name, curves=curves_df, all_years=years)
     reshaped = reshape_cluster_sector_curves(init_curves, years)
 
     return reshaped
 
 
+def push_ctm_scenario_to_etm(ctm_session:str, etm_session:str, etm_token:str):
+    try:
+        ctm = CTMClient(use_beta=True)
+        ctm.load_session(session_id=ctm_session)
+    except:
+        print('Err loading the CTM session')
 
+    # Try coupling immediately (empty session)
+    try:
+        etm_result = ctm.couple_etm(
+            auth_token=etm_token,
+            etm_session_id=etm_session
+        )
+        print('Pushed CTM session to ETM')
+        return etm_result
+    except Exception as e: 
+        print(f'Err pushing to ETM: {e}')  

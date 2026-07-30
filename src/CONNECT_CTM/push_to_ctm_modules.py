@@ -114,12 +114,10 @@ def load_all_plants_scenario_data(
 
      # -- Process each workbook ------------------------------------------
     for wb_source, file_bytes in workbooks:
-        # print(f'plant match {wb_source}')
         plant_name = Path(wb_source).stem if isinstance(wb_source, str) else str(wb_source).split('/')[-1].split('.')[0]
         try:
             # Find plant in mapping by name
             plant_match = mapping_df.filter(pl.col("DSH plant name") == plant_name)
-            # print(f'plant match {plant_match}')
             if plant_match.is_empty():
                 logs.append(f"[WARN] {plant_name} not in mapping")
                 print(f"[WARN] {plant_name} not in mapping")
@@ -144,6 +142,7 @@ def load_all_plants_scenario_data(
 
                     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
                         tmp.write(file_content)
+                        tmp.flush()
                         wb_path = tmp.name
 
                 except Exception as e:
@@ -197,11 +196,15 @@ def load_all_plants_scenario_data(
                 '''??????????????????????????????????????'''
 
             # Clean up temp file if created
-            if not isinstance(wb_source, str) and 'tmp' in locals():
-                Path(wb_path).unlink()
+            if not isinstance(plants_workbook_dir, str):
+                try:
+                    Path(wb_path).unlink()
+                except:
+                    pass
         except Exception as e:
             errors.append(f"{plant_name}: {e}")
             logs.append(f"[ERROR] {errors[-1]}")
+            print(f"[ERROR] {errors[-1]}")
     
     # Group by (scenario, year)
     scenario_year_groups = {}
@@ -634,6 +637,7 @@ def push_aggregated_by_scenario_year(
     energy_cols: list[str] = UTILITY_COLS_ORDER,
     cluster_sector_file: Optional[str] | pl.DataFrame = None,
     cluster_sector_production_sheet_name: str = None,
+    cluster_sector_curves_sheet_name: str = None,
     cluster_sector_production: pl.DataFrame = None,
     reference_year: int = REFERENCE_YEAR,
     use_beta: bool = True,
@@ -641,6 +645,7 @@ def push_aggregated_by_scenario_year(
     output_log_file: Optional[str] = None,
     reuse_sessions: Optional[Dict[Tuple, str]] = None,
     selected_scenarios: list[str] = ALL_SCENARIOS,
+    selected_years: list[str] = SCENARIO_YEARS,
     session_path: str = ''
 ) -> dict:
     """
@@ -708,8 +713,10 @@ def push_aggregated_by_scenario_year(
             all_logs.append("STEP 1B: Loading and reshaping cluster/sector curves...")
             print("STEP 1B: Loading and reshaping cluster/sector curves...")
             if type(cluster_sector_file) == str:
-                cluster_sector_df_long = get_final_cluster_sector_curves(excel_path=cluster_sector_file, years=SCENARIO_YEARS)
+                # if it's a path
+                cluster_sector_df_long = get_final_cluster_sector_curves(excel_path=cluster_sector_file, sheet_name=cluster_sector_curves_sheet_name, years=SCENARIO_YEARS)
             else:
+                # if it's a dataframe
                 cluster_sector_df_long = get_final_cluster_sector_curves(curves_df=cluster_sector_file, years=SCENARIO_YEARS)
 
             cluster_sector_df_long = cluster_sector_df_long.filter(~pl.col('Sector').is_in(['refineries', 'steel']))
@@ -737,11 +744,13 @@ def push_aggregated_by_scenario_year(
 
     
     # Step 2: Process each scenario-year combo
-    all_logs.append(f"\nSTEP 2: Processing {len(scenario_year_groups)} scenario-year combos...")
-    print(f"\nSTEP 2: Processing {len(scenario_year_groups)} scenario-year combos...")
-    
+    num_scenarios = len(selected_scenarios) * len(selected_years)
+    all_logs.append(f"\nSTEP 2: Processing {num_scenarios} scenario-year combos...")
+    print(f"\nSTEP 2: Processing {num_scenarios} scenario-year combos...")
+
     for (scenario, year), plants_in_year in sorted(scenario_year_groups.items()):
-        if scenario in selected_scenarios:
+        print(f'{scenario}, {year}, {type(year)}, {scenario in selected_scenarios}, {year in selected_years}')
+        if (scenario in selected_scenarios) and (year in selected_years):
             scenario_key = (scenario, year)
             all_logs.append(f"\n[{scenario} / {year}] — {len(plants_in_year)} plant-records")
             
