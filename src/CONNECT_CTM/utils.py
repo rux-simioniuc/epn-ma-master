@@ -1,7 +1,11 @@
 import polars as pl
 from pathlib import Path
-from .constants import SCENARIO_YEARS
+from openpyxl import load_workbook
+from typing import Dict
+import tempfile
+from .constants import SCENARIO_YEARS, EMISSION_COLS_ORDER, UTILITY_COLS_ORDER
 from .ctm_client import CTMClient
+from .read_DSH_files import read_all_scenario_sheets
 # read and transform mapping excel
 
 
@@ -35,6 +39,8 @@ def normalize_sector_cluster_mapping(df:pl.DataFrame) -> pl.DataFrame:
         'cluster_6': 'cluster_6',
         'Cluster 6': 'cluster_6',
         'cluster 6': 'cluster_6',
+        'Overig': 'cluster_6',
+        'overig': 'cluster_6',
         'noord_nederland': 'noord_nederland',
         'Noord-Nederland': 'noord_nederland',
         'noord nederland': 'noord_nederland',
@@ -42,6 +48,7 @@ def normalize_sector_cluster_mapping(df:pl.DataFrame) -> pl.DataFrame:
         'Zeeland-West-Brabant': 'zeeland_west_brabant',
         'zeeland west brabant': 'zeeland_west_brabant',
         'Gebruiker stuurt op via API': 'gebruiker_stuurt_op_via_api',
+
     }
     
     # Sector normalizations
@@ -317,3 +324,365 @@ def push_ctm_scenario_to_etm(ctm_session:str, etm_session:str, etm_token:str):
         return etm_result
     except Exception as e: 
         print(f'Err pushing to ETM: {e}')  
+
+
+def get_master_projects(
+        mapping_df: pl.DataFrame,
+        reference_emission_df: pl.DataFrame,
+        reference_utility_df: pl.DataFrame, 
+        projects_emission_df: pl.DataFrame,
+        projects_utility_df: pl.DataFrame,
+        REF_YEAR: str = '2024',
+        included_emissions: list[str] = ['CO2', 'CCU/CCS'],
+        scenario_list: list[str]= ['Electrification', 'Hydrogen', 'CCS and (green) gas'] # TODO these are in english in DSH but Dutch in all other scenario work; what do?
+        )-> pl.DataFrame:
+
+    # some constants
+    basic_details_cols = [
+        'Plant identifier',
+        'Plant',
+        'Cluster',
+        'Project name',
+        'Project Type',
+        'Description',
+        'Prob. of success',
+        'Year of operation',]
+
+    details_cols = basic_details_cols + ['Associated Scenarios',
+                                         'Part of Preferred Strategy',]
+
+    emission_cols = included_emissions
+    utility_cols = [
+        'Electricity',
+        'Electricity_peak',
+        'Natural Gas',
+        'Hydrogen',
+        'Green gas',
+        'Other',
+        ]
+
+    # STRATEGIES_ORDER = ['Electrification', 'Hydrogen', 'CCS and (green) gas']
+
+    print(f'utility cols {projects_utility_df.columns}')
+
+    # select only relevant columns
+    proj_utilities_filt = projects_utility_df.select(
+        details_cols + [
+            'Utility',
+            'Demand annual',
+            'Supply annual',
+            'Offtake peak'
+            ])
+
+    proj_emissions_filt = projects_emission_df.select(
+        details_cols + [
+            'Emission',
+            'Annual emission',
+            ])
+
+    # pivot emissions
+    emissions_pivoted = proj_emissions_filt.pivot(
+            "Emission",
+            index= [x for x in proj_emissions_filt.columns if x not in ['Emission', 'Annual emission']],
+            values='Annual emission'
+        ).with_columns(pl.sum_horizontal("NOx", "N2O").alias('N2O')
+                    ).drop(['NOx'])
+
+    # pivot utilities
+    # select CCU/CCS only for supply and add them up
+    utilities_ccu = proj_utilities_filt.filter(pl.col('Utility').is_in(['CO2 (fossil) CCU/CCS','CO2 (bio) CCU/CCS'])
+                                           ).pivot(
+                                               'Utility',
+                                                values='Supply annual',
+                                                index = ['Plant identifier',
+                                                         'Project name',
+                                                        ]
+                ).with_columns(pl.sum_horizontal('CO2 (fossil) CCU/CCS','CO2 (bio) CCU/CCS').alias('CCU/CCS')
+                ).drop(['CO2 (fossil) CCU/CCS','CO2 (bio) CCU/CCS'])
+
+    # get the peak electricity
+    utilities_peak = proj_utilities_filt.filter(pl.col('Utility') == 'Electricity').pivot(
+                'Utility',
+                values='Offtake peak',
+                index = ['Plant identifier',
+                    'Project name',
+                    ],
+            ).rename({'Electricity':'Electricity_peak'})
+
+    # get rest of utilities
+    utilities_all = proj_utilities_filt.filter(~pl.col('Utility').is_in(['CO2 (fossil) CCU/CCS','CO2 (bio) CCU/CCS'])).pivot(
+                'Utility',
+                values=['Demand annual'],
+                index = details_cols,      
+            ).with_columns(
+                pl.sum_horizontal('Hydrogen ( >98% vol.%) (LHV)','Hydrogen ( <98% vol.%) (LHV)').alias('Hydrogen')
+                ).drop(['Hydrogen ( <98% vol.%) (LHV)', 'Hydrogen ( >98% vol.%) (LHV)'])
+
+    # join everything for utility
+    utilities_pivoted = utilities_all.join(
+        utilities_peak,
+        on=['Plant identifier', 'Project name'],
+        how='full'
+    )
+    utilities_pivoted = utilities_pivoted.drop([i for i in utilities_pivoted.columns if '_right' in i])
+
+    utilities_pivoted = utilities_pivoted.join(
+        utilities_ccu,
+        on=['Plant identifier', 'Project name'],
+        how='full'
+    )
+    utilities_pivoted = utilities_pivoted.drop([i for i in utilities_pivoted.columns if '_right' in i])
+
+    # join emissions and utilities
+    projects = utilities_pivoted.join(
+        emissions_pivoted,
+        on= ['Plant identifier', 'Project name'],
+        how='full'
+    )
+
+    # complete common columns then remove the duplicate
+    # the fill_null() replaces missing values
+    projects = projects.with_columns([pl.col(i).fill_null(pl.col(f'{i}_right')) for i in details_cols]
+                      ).drop([f'{i}_right' for i in details_cols])
+
+    # select only relevant cols
+    projects = projects.select([x for x in details_cols + emission_cols + utility_cols if x in projects.columns])
+
+    # add columns for scenarios'
+    for scenario in scenario_list:
+        projects = projects.with_columns(
+            pl.col("Associated Scenarios")
+            .fill_null("")
+            .str.contains(scenario, literal=True)
+            .alias(f"Scenario {scenario}")
+        )
+
+    # preferred strategy maps to VT and Midden
+    # TODO: make an option for user selection of this
+    projects = projects.with_columns(
+            [pl.col('Part of Preferred Strategy').alias('Scenario VT'), 
+            pl.col('Part of Preferred Strategy').alias('Scenario Midden')]
+            ).drop(['Associated Scenarios', 'Part of Preferred Strategy'])
+
+
+    # work the reference data now
+    # select the reference year only
+    ref_emission_filt = reference_emission_df.filter(pl.col('Year').cast(pl.String) == REF_YEAR)
+    ref_utility_filt = reference_utility_df.filter(pl.col('Year').cast(pl.String) == REF_YEAR)
+
+    # pivot
+    ref_emission_pivoted = ref_emission_filt.pivot(
+        'Emission',
+        index = ['Plant identifier', 'Plant'],
+        values=['Annual amount']
+    ).with_columns(pl.sum_horizontal("NOx", "N2O").alias('N2O')
+                ).drop(['NOx'])
+
+    # same work as for the project utilities
+    ref_util_ccu = ref_utility_filt.filter(pl.col('Utility').is_in(['CO2 (fossil) CCU/CCS','CO2 (bio) CCU/CCS'])
+                                            ).pivot(
+                                                'Utility',
+                                                    values='Annual supply',
+                                                    index = ['Plant identifier']
+                    ).with_columns(pl.sum_horizontal('CO2 (fossil) CCU/CCS','CO2 (bio) CCU/CCS').alias('CCU/CCS')
+                    ).drop(['CO2 (fossil) CCU/CCS','CO2 (bio) CCU/CCS'])
+
+
+    ref_util_peak = ref_utility_filt.filter(pl.col('Utility') == 'Electricity'
+                                            ).pivot(
+                                                'Utility',
+                                                values='Peak demand',
+                                                index = ['Plant identifier'],
+                                            ).rename({'Electricity':'Electricity_peak'})
+
+
+    ref_util_all = ref_utility_filt.filter(~pl.col('Utility').is_in(['CO2 (fossil) CCU/CCS','CO2 (bio) CCU/CCS'])
+                                           ).pivot(
+                                               'Utility',
+                                                values=['Annual demand'],
+                                                index = ['Plant identifier'],      
+                                                ).with_columns(
+                                                    pl.sum_horizontal('Hydrogen ( >98% vol.%) (LHV)','Hydrogen ( <98% vol.%) (LHV)').alias('Hydrogen')
+                                                    ).drop(['Hydrogen ( <98% vol.%) (LHV)', 'Hydrogen ( >98% vol.%) (LHV)'])
+
+    ref_util_pivoted = ref_util_all.join(
+        ref_util_peak,
+        on=['Plant identifier'],
+        how='full'
+    )
+
+    ref_util_pivoted = ref_util_pivoted.drop([i for i in ref_util_pivoted.columns if '_right' in i])
+
+    ref_util_pivoted = ref_util_pivoted.join(
+        ref_util_ccu,
+        on=['Plant identifier'],
+        how='full'
+    )
+    ref_util_pivoted = ref_util_pivoted.drop([i for i in ref_util_pivoted.columns if '_right' in i])
+
+    ref_full = ref_util_pivoted.join(ref_emission_pivoted,
+                      on=['Plant identifier'],
+                      how='full')
+
+    ref_full = ref_full.with_columns([pl.lit(None).alias(i) for i in emission_cols + utility_cols if i not in ref_full.columns])
+
+    ref_full = ref_full.select(['Plant identifier'] + emission_cols + utility_cols)
+
+    # now add the reference
+    merged = projects.join(
+        ref_full,
+        on='Plant identifier',
+        how='left',
+        suffix='_ref'
+    )
+
+    for metric in emission_cols+utility_cols:
+        proj_col = metric
+        ref_col = f"{metric}_ref"
+        percent_col = f"{metric}_%"
+        
+        if ref_col in merged.columns and proj_col in merged.columns:
+            # (proj_col / ref_col ) * 100    
+            merged = merged.with_columns(
+                pl.when(pl.col(ref_col) != 0)
+                .then((pl.col(proj_col) / pl.col(ref_col)) * 100)
+                .otherwise(None)
+                .alias(percent_col)
+            )
+        
+    # Drop reference columns (keep only original + percentages)
+    cols_to_drop = [f"{m}_ref" for m in emission_cols+utility_cols if f"{m}_ref" in merged.columns]
+    merged = merged.drop(cols_to_drop)
+
+    # get the order for the value cols
+    metric_pairs = []
+    for metric in emission_cols+utility_cols:
+        if metric in merged.columns:
+            metric_pairs.append(metric)
+        percent_col = f"{metric}_%"
+        if percent_col in merged.columns:
+            metric_pairs.append(percent_col)
+
+    # add cluster/sector from mapping file
+    mapping = mapping_df.select(['DSH plant id', 'Sector', 'Cluster'])
+
+    merged = merged.drop('Cluster').join(mapping,
+                left_on='Plant identifier',
+                right_on = 'DSH plant id',
+                how='left')
+
+    merged_fin = merged.select(basic_details_cols + metric_pairs + [x for x in merged.columns if 'scenario' in x.lower()])
+
+    return merged_fin
+
+
+def read_all_scenario_sheets_from_excels(
+    excel_files_dict: Dict[str, bytes],
+    reference_year: str|int = '2024',
+) -> pl.DataFrame:
+    """
+    Read all Scenario X sheets from all generated Excel files.
+    Returns combined DataFrame with plant name from filename.
+    """
+        
+    all_scenario_records = []
+    
+    for file_name, file_bytes in excel_files_dict.items():
+        # Extract plant name from filename (e.g., "Plant A.xlsx" → "Plant A")
+        plant_name = Path(file_name).stem
+        
+        # Save to temp file
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+        
+        try:
+            
+            df = read_all_scenario_sheets(
+                workbook_path=str(tmp_path),
+                emission_cols=EMISSION_COLS_ORDER,
+                energy_cols=UTILITY_COLS_ORDER,
+                reference_year='0', # if it's 0 the reference is also included here
+                aggregate_flow_types=False, 
+            )
+
+            reference = df.filter(
+                pl.col("Year") == str(reference_year)
+            )
+            
+            # Set Scenario to 'Reference'
+            reference = reference.with_columns(
+                pl.lit("Reference").alias("Scenario")
+            )
+            
+            # Remove duplicates (same plant, year, flow_type should have same metric values)
+            reference = reference.unique(
+                subset=["Scenario", "Year", "Flow type"],
+                keep="first"
+            )
+
+            scenario_data = df.filter(pl.col("Year") != "2024")
+
+            # Combine
+            master = pl.concat([scenario_data, reference])
+
+            if not master.is_empty():
+                # Add plant name
+                master = master.with_columns(
+                    pl.lit(plant_name).alias("Plant name")
+                )
+                all_scenario_records.append(master)
+                
+        
+        except Exception as e:
+            print(f"    [ERROR] {e}")
+        finally:
+            Path(tmp_path).unlink()  # Clean up temp file
+ 
+    if all_scenario_records:
+        scenario_data = pl.concat(all_scenario_records, how='vertical_relaxed')
+        print(f"Combined scenario data: {scenario_data.shape}")
+        print(f"Columns: {scenario_data.columns}")
+    else:
+        print("No scenario data found!")
+        scenario_data = pl.DataFrame()
+        
+    return scenario_data
+
+
+def get_master_emissions_utilities(
+        mapping_df: pl.DataFrame,
+        excel_files_dict: Dict[str, bytes],
+        reference_year: str|int = '2024',
+        ) -> pl.DataFrame:
+
+    scenario_data = read_all_scenario_sheets_from_excels(
+        excel_files_dict, reference_year
+    )
+
+    mapping_subset = mapping_df.select([
+        "DSH plant name",
+        "Cluster",
+        "Sector",
+    ]).unique()
+    
+    # Join on plant name
+    df_enriched = scenario_data.join(
+        mapping_subset,
+        left_on='Plant name',
+        right_on="DSH plant name",
+        how="left"
+    )
+
+    # Drop DSH plant name (duplicate)
+    if "DSH plant name" in df_enriched.columns:
+        df_enriched = df_enriched.drop("DSH plant name")
+
+    # Reorder: Cluster and Sector after plant info, before metrics
+    base_cols = ["Plant name", "Cluster", "Sector", "Scenario", "Year", "Flow type"]
+    metric_cols = [c for c in df_enriched.columns if c not in base_cols]
+
+    df_enriched = df_enriched.select(base_cols + metric_cols).sort(['Plant name', 'Year', 'Flow type'])
+
+    return df_enriched
+

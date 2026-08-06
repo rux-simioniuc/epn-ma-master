@@ -21,7 +21,7 @@ from .push_to_ctm import (
     construct_custom_site_inputs,
 )
 from .constants import SCENARIO_YEARS, REFERENCE_YEAR, EMISSION_COLS_ORDER, UTILITY_COLS_ORDER    
-from .ctm_constants import SECTORS, CLUSTERS, ALL_SCENARIOS
+from .ctm_constants import SECTORS, CLUSTERS, ALL_SCENARIOS, OVERRIDES
 
 
 def get_custom_ctm_inputs() -> Dict:
@@ -334,52 +334,52 @@ def build_ctm_inputs_from_plants(
 
 # -- 3. BUILD CLUSTER/SECTOR INPUTS -----------------------------------------
 
-def build_ctm_inputs_from_cluster_sector(
-    cluster_sector_data: pl.DataFrame,
-) -> Tuple[Dict, List]:
-    """
-    Map cluster/sector aggregated data to CTM input format.
+# def build_ctm_inputs_from_cluster_sector(
+#     cluster_sector_data: pl.DataFrame,
+# ) -> Tuple[Dict, List]:
+#     """
+#     Map cluster/sector aggregated data to CTM input format.
     
-    Args:
-        cluster_sector_data: DataFrame (after reshape_cluster_sector_curves) with columns:
-            Cluster, Sector, Scenario, Year, Value, Utility, Flow type
+#     Args:
+#         cluster_sector_data: DataFrame (after reshape_cluster_sector_curves) with columns:
+#             Cluster, Sector, Scenario, Year, Value, Utility, Flow type
     
-    Returns:
-        (inputs_dict, logs)
-    """
-    logs = []
-    inputs = {}
+#     Returns:
+#         (inputs_dict, logs)
+#     """
+#     logs = []
+#     inputs = {}
     
-    # Iterate over rows
-    for row in cluster_sector_data.to_dicts():
-        sector = row.get("Sector").lower().replace('-', '_').replace(' ', '_')
-        cluster = row.get("Cluster").lower().replace('-', '_').replace(' ', '_')
-        utility = row.get("Utility").lower().replace('-', '_').replace(' ', '_')
-        flow_type = row.get("Flow type", "demand").lower()
-        value = row.get("Value")
+#     # Iterate over rows
+#     for row in cluster_sector_data.to_dicts():
+#         sector = row.get("Sector").lower().replace('-', '_').replace(' ', '_')
+#         cluster = row.get("Cluster").lower().replace('-', '_').replace(' ', '_')
+#         utility = row.get("Utility").lower().replace('-', '_').replace(' ', '_')
+#         flow_type = row.get("Flow type", "demand").lower()
+#         value = row.get("Value")
         
-        if not all([sector, cluster, utility, flow_type, value is not None]):
-            continue
+#         if not all([sector, cluster, utility, flow_type, value is not None]):
+#             continue
 
-        # enable the sector / industry curves
-        enable_key = f"{sector}&&{cluster}&&cluster&&enable"
-        inputs[enable_key] = '1'
+#         # enable the sector / industry curves
+#         enable_key = f"{sector}&&{cluster}&&cluster&&enable"
+#         inputs[enable_key] = '1'
 
         
-        # Normalize utility name to CTM format (lowercase, spaces->underscores)
-        ctm_utility = utility#.lower().replace(" ", "_").replace("(", "").replace(")", "")
+#         # Normalize utility name to CTM format (lowercase, spaces->underscores)
+#         ctm_utility = utility#.lower().replace(" ", "_").replace("(", "").replace(")", "")
         
-        # Build CTM input key for cluster level
-        ctm_key = f"{sector}&&{cluster}&&cluster&&{ctm_utility}_{flow_type}"
-        if value != 0:
-            inputs[ctm_key] = str(value)
+#         # Build CTM input key for cluster level
+#         ctm_key = f"{sector}&&{cluster}&&cluster&&{ctm_utility}_{flow_type}"
+#         if value != 0:
+#             inputs[ctm_key] = str(value)
 
-            # if sector in ['refineries', 'steel']:
-            #     print('x')
+#             # if sector in ['refineries', 'steel']:
+#             #     print('x')
             
-    logs.append(f"Cluster-sector: {sector}/{cluster} = {len(inputs)} inputs")
+#     logs.append(f"Cluster-sector: {sector}/{cluster} = {len(inputs)} inputs")
     
-    return inputs, logs
+#     return inputs, logs
 
 
 def build_sector_cluster_sites(
@@ -425,6 +425,59 @@ def build_sector_cluster_sites(
             # Build CTM input key for cluster level
             ctm_key = f"{sector}&&{cluster}&&{input_key}&&{ctm_utility}_{flow_type}"
             inputs[ctm_key] = str(value)
+            
+    logs.append(f"Cluster-sector: {sector}/{cluster} = {len(inputs)} inputs")
+    
+    return inputs, logs
+
+
+def build_sector_cluster_sites_EXTRA(
+    cluster_sector_data: pl.DataFrame,
+    mapping: pl.DataFrame
+) -> Tuple[Dict, List]:
+    """
+    Map cluster/sector aggregated data to CTM input format ONLY FOR REFINERIES STEEL FERTILIZERS.
+    
+    Args:
+        cluster_sector_data: DataFrame (after reshape_cluster_sector_curves) with columns:
+            Cluster, Sector, Scenario, Year, Value, Utility, Flow type
+    
+    Returns:
+        (inputs_dict, logs)
+    """
+    logs = []
+    inputs = {}
+
+    mapping_subset = mapping.filter(pl.col('DSH plant id') == '1')
+
+    
+    # Iterate over rows
+    for row in cluster_sector_data.to_dicts():
+        sector = row.get("Sector").lower().replace('-', '_').replace(' ', '_')
+        cluster = row.get("Cluster").lower().replace('-', '_').replace(' ', '_')
+        utility = row.get("Utility").lower().replace('-', '_').replace(' ', '_')
+        flow_type = row.get("Flow type", "demand").lower()
+        value = row.get("Value")
+        
+        if not all([sector, cluster, utility, flow_type, value is not None]):
+            continue
+
+        result = mapping_subset.filter(
+            (pl.col('Sector').str.to_lowercase() == sector) & 
+            (pl.col('Cluster').str.to_lowercase() == cluster)
+        ).select(pl.col('Name reformatted'))
+
+        if result.is_empty():
+            logs.append(f"[SKIP] No mapping for {sector}/{cluster}")
+            continue  # Skip this combo
+
+        site_number = result.item()
+
+        if value != 0:
+            inputs[f"{site_number}&&enabled"] = '1'
+            inputs[f"{site_number}&&cluster"] = cluster
+            inputs[f"{site_number}&&sector"] = sector
+            inputs[f"{site_number}&&{utility}_{flow_type}"] = str(value)
             
     logs.append(f"Cluster-sector: {sector}/{cluster} = {len(inputs)} inputs")
     
@@ -714,12 +767,13 @@ def push_aggregated_by_scenario_year(
             print("STEP 1B: Loading and reshaping cluster/sector curves...")
             if type(cluster_sector_file) == str:
                 # if it's a path
-                cluster_sector_df_long = get_final_cluster_sector_curves(excel_path=cluster_sector_file, sheet_name=cluster_sector_curves_sheet_name, years=SCENARIO_YEARS)
+                cluster_sector_df_long_init = get_final_cluster_sector_curves(excel_path=cluster_sector_file, sheet_name=cluster_sector_curves_sheet_name, years=SCENARIO_YEARS)
             else:
                 # if it's a dataframe
-                cluster_sector_df_long = get_final_cluster_sector_curves(curves_df=cluster_sector_file, years=SCENARIO_YEARS)
+                cluster_sector_df_long_init = get_final_cluster_sector_curves(curves_df=cluster_sector_file, years=SCENARIO_YEARS)
 
-            cluster_sector_df_long = cluster_sector_df_long.filter(~pl.col('Sector').is_in(['refineries', 'steel']))
+            cluster_sector_df_long = cluster_sector_df_long_init.filter(~pl.col('Sector').is_in(['refineries', 'steel']))
+            cluster_sector_df_long_EXTRA = cluster_sector_df_long_init.filter(pl.col('Sector').is_in(['refineries', 'steel']))
             all_logs.append(f"  ✓ Reshaped cluster/sector data: {len(cluster_sector_df_long)} rows")
         except Exception as e:
             all_logs.append(f"[ERROR] Failed to load cluster-sector data: {e}")
@@ -749,7 +803,7 @@ def push_aggregated_by_scenario_year(
     print(f"\nSTEP 2: Processing {num_scenarios} scenario-year combos...")
 
     for (scenario, year), plants_in_year in sorted(scenario_year_groups.items()):
-        print(f'{scenario}, {year}, {type(year)}, {scenario in selected_scenarios}, {year in selected_years}')
+        # print(f'{scenario}, {year}, {type(year)}, {scenario in selected_scenarios}, {year in selected_years}')
         if (scenario in selected_scenarios) and (year in selected_years):
             scenario_key = (scenario, year)
             all_logs.append(f"\n[{scenario} / {year}] — {len(plants_in_year)} plant-records")
@@ -802,6 +856,22 @@ def push_aggregated_by_scenario_year(
                         all_logs.extend(cluster_logs)
                 except Exception as e:
                     all_logs.append(f"[ERROR] Cluster/sector: {e}")
+
+            if cluster_sector_df_long_EXTRA is not None:
+                try:
+                    filtered = cluster_sector_df_long_EXTRA.filter(
+                        (pl.col("Scenario").str.to_lowercase() == scenario.lower()) & 
+                        (pl.col("Year") == year)
+                    )
+                    if not filtered.is_empty():
+                        cluster_inputs, cluster_logs = build_sector_cluster_sites_EXTRA(
+                            cluster_sector_data=filtered,
+                            mapping=mapping_df
+                        )
+                        all_inputs.update(cluster_inputs)
+                        all_logs.extend(cluster_logs)
+                except Exception as e:
+                    all_logs.append(f"[ERROR] Cluster/sector: {e}")
             
             # Add sector/cluster production
             if sector_cluster_prod_df is not None:
@@ -825,6 +895,9 @@ def push_aggregated_by_scenario_year(
             all_inputs.update(custom_inputs)
             all_logs.append(f"Added {len(custom_inputs)} custom inputs")
 
+
+            ### Add hardcoded overrides
+            all_inputs.update(OVERRIDES)
             
             # Push to CTM
             if all_inputs and len(all_inputs) > 1:

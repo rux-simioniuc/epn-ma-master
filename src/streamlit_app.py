@@ -24,7 +24,7 @@ sys.path.insert(0, str(src_path))
 
 # from DSH2CTM.main import read_csv
 from DSH2CTM.streamlit_utils import *
-from CONNECT_CTM.utils import push_ctm_scenario_to_etm
+from CONNECT_CTM.utils import push_ctm_scenario_to_etm, get_master_emissions_utilities, get_master_projects
 
 
 # ── Page config ────────────────────────────────────────────────────────
@@ -69,15 +69,6 @@ with st.sidebar.expander("ETM Settings", expanded=False):
         st.session_state.etm_token = etm_token
         st.success("Token cached")
     
-    # etm_scenario = st.text_input(
-    #     "ETM Scenario ID",
-    #     value=st.session_state.etm_scenario_id,
-    #     key="etm_scenario_input",
-    # )
-    # if etm_scenario:
-    #     st.session_state.etm_scenario_id = etm_scenario
-    #     st.success("Scenario ID cached")
-
 
 # ── Main tabs ──────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["DSH Input & Output", "CTM/ETM Workflow"])
@@ -451,9 +442,12 @@ with tab2:
     if 'scenario_years' not in st.session_state:
         st.session_state.scenario_years = None
     if 'production_curves_df' not in st.session_state:
-            st.session_state.production_curves_df = None
+        st.session_state.production_curves_df = None
     if 'session_json' not in st.session_state:
-                st.session_state.session_json = None
+        st.session_state.session_json = None
+    # if 'plant_files' not in st.session_state:
+    #     st.session_state.plant_files = None
+
 
     st.markdown("## CTM Session Management & ETM Coupling")
     with st.expander("Instructions and Details", expanded=True):
@@ -473,7 +467,8 @@ with tab2:
                 key="plant_files",
             )
             if plant_files:
-                st.success(f"✓ {len(plant_files)} files uploaded")                      
+                st.success(f"✓ {len(plant_files)} files uploaded")  
+                # st.session_state.plant_files = plant_files                    
         with col2:
             st.markdown("### Mapping File")
             mapping_file = st.file_uploader(
@@ -554,6 +549,7 @@ with tab2:
 
 
                 ref_year = st.text_input('Reference year', value = ref_year, width=200)
+                st.session_state.ref_year = ref_year
                 scenario_yrs = st.text_input('Scenario years', value = ', '.join(years), width=200)
                 scenario_years = scenario_yrs.replace(' ', '').split(',')
 
@@ -571,7 +567,7 @@ with tab2:
                 st.markdown("### Load Existing Sessions")
                 st.session_state.session_json = st.text_area(
                     "Paste session IDs (JSON format)",
-                    height=150,
+                    height=185,
                     help='{("Scenario", "Year"): "SE-xxxxx", \n("Scenario", "Year"): "SE-xxxxx"}',
                 )
 
@@ -711,6 +707,8 @@ with tab2:
 
                         try:
                             aux_result = push_ctm_scenario_to_etm(ctm_session, etm_session, st.session_state.etm_token)
+                            st.text(f"Done")
+                            st.write(aux_result)
                         except Exception as e:
                             st.text(f"[ERROR]: {e}")
                             st.session_state.push_logs.append(f"[ERROR]: {e}")
@@ -775,6 +773,84 @@ with tab2:
             st.session_state.push_logs = []
             st.session_state.ctm_sessions = {}
             st.success("Cache cleared")
+
+
+#''' Extra sidetab '''
+
+st.sidebar.markdown("### Extra options")
+
+disable_master = (not plant_files or st.session_state.mapping.is_empty())
+disable_master_projects = not all([
+    reference_emissions, 
+    reference_utility,  
+    project_emission, 
+    project_utility, 
+    ]) or st.session_state.mapping.is_empty()
+
+with st.sidebar.expander("Download helper files", expanded=False):
+    if st.button('Generate Master util/emission File', use_container_width=True, disabled=disable_master):
+        try:
+
+            excel_files_dict = {}
+            for uploaded_file in plant_files:
+                file_name = uploaded_file.name
+                file_bytes = uploaded_file.read()
+                excel_files_dict[file_name] = file_bytes
+
+
+            master = get_master_emissions_utilities(
+                mapping_df=st.session_state.mapping,
+                excel_files_dict = excel_files_dict,
+                reference_year = st.session_state.ref_year
+                )
+            if master is not None:
+                # Convert to bytes
+                buffer = io.BytesIO()
+                master.write_excel(buffer)
+                buffer.seek(0)
+                excel_bytes_master = buffer.getvalue()
+                
+                st.download_button(
+                    label="Download master_emission_utilities.xlsx",
+                    data=excel_bytes_master,
+                    file_name="master_emission_utilities.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+        except Exception as e:
+            st.error(f'[ERROR]: {e}')
+
+    if disable_master:
+            st.warning('plant files and mapping', title='Upload files')  
+    if st.button('Generate Master Projects File', use_container_width=True, disabled=disable_master_projects):
+        st.write('Yey')
+        try:
+            master_projects = get_master_projects(
+                mapping_df=st.session_state.mapping,
+                reference_emission_df=read_csv_streamlit(reference_emissions),
+                reference_utility_df=read_csv_streamlit(reference_utility),
+                projects_emission_df=read_csv_streamlit(project_emission),
+                projects_utility_df=read_csv_streamlit(project_utility),
+                REF_YEAR = st.session_state.ref_year
+                )
+            if master_projects is not None:
+                # Convert to bytes
+                buffer = io.BytesIO()
+                master_projects.write_excel(buffer)
+                buffer.seek(0)
+                excel_bytes_projects = buffer.getvalue()
+                
+                st.download_button(
+                    label="Download master_project.xlsx",
+                    data=excel_bytes_projects,
+                    file_name="master_project.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+        except Exception as e:
+            st.error(f'[ERROR]: {e}')
+        
+    if disable_master_projects:
+        st.warning('mapping, DSH files (reference + projects)', title='Upload files')  
+
 
 
 # ── Footer ─────────────────────────────────────────────────────────────

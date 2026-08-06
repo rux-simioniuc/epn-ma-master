@@ -73,7 +73,7 @@ def read_scenario_sheet(
     sheet_name: str,
     emission_cols: list[str],
     energy_cols: list[str],
-    reference_year: int,
+    reference_year: int|str,
 ) -> pl.DataFrame:
     """
     Read a Scenario X sheet created by write_scenario_sheets().
@@ -225,7 +225,7 @@ def read_all_scenario_sheets(
     workbook_path: str,
     emission_cols: list[str],
     energy_cols: list[str],
-    reference_year: int,
+    reference_year: int|str,
     aggregate_flow_types:bool = True
 ) -> pl.DataFrame:
     """
@@ -266,7 +266,7 @@ def save_scenario_values(
     output_dir: str,
     emission_cols: list[str],
     energy_cols: list[str],
-    reference_year: int,
+    reference_year: int|str,
 ) -> str:
  
     df = read_all_scenario_sheets(

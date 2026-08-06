@@ -92,6 +92,33 @@ ETM_session_ids = {
     ("Waterstof", "2050"): "1450965",
 }
 
+CTM_session_ids_AUX = {
+    ("Elektrificatie", "2030"): "SE-1e407420c9a5d43a",
+    ("Elektrificatie", "2035"): "SE-da02a7ef9446218f",
+    ("Elektrificatie", "2040"): "SE-25159daf105bb083",
+    ("Elektrificatie", "2050"): "SE-01a63528b3722e6c",
+
+    ("Midden", "2030"): "SE-439a93c354af56b6",
+    ("Midden", "2035"): "SE-3615d35ff28ccc09",
+    ("Midden", "2040"): "SE-1c0f1e92789ee02e",
+    ("Midden", "2050"): "SE-4107e05ef77c27cb",
+
+    ("Groen gas", "2030"): "SE-f1a821ecb51f473c",
+    ("Groen gas", "2035"): "SE-f1857cfb72b620bb",
+    ("Groen gas", "2040"): "SE-d95a76d277d18f55",
+    ("Groen gas", "2050"): "SE-1696daf6919cba33",
+
+    ("VT", "2030"): "SE-dd992b8930c23684",
+    ("VT", "2035"): "SE-b30e581ca9f79fc7",
+    ("VT", "2040"): "SE-16d95ef464c9bbd9",
+    ("VT", "2050"): "SE-0ae5c7f1a07ae062",
+
+    ("Waterstof", "2030"): "SE-e43a730adf9af2c5",
+    ("Waterstof", "2035"): "SE-83558d53ee78864b",
+    ("Waterstof", "2040"): "SE-f61bfdb797dc6f3e",
+    ("Waterstof", "2050"): "SE-77d3c0afa9b3eb93",
+}
+
 etm_test_session = '1463394'
 
 # token = 'etm_eyJraWQiOiJkODI5ZTk3YTU4ZDhhOTQyYjg3NGI5ZjNiZWI3ZDJlNGY0MTA5ZjIzNWE0Y2NhMDkzYmU5MzFiMzY1NTlkNGI2IiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiJodHRwczovL215LmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20iLCJpYXQiOjE3ODI1MDQ2ODQsImF1ZCI6Imh0dHBzOi8vZW5naW5lLmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20gaHR0cHM6Ly8yMDI1LTAxLmVuZ2luZS5lbmVyZ3l0cmFuc2l0aW9ubW9kZWwuY29tIiwic2NvcGVzIjoib3BlbmlkIHB1YmxpYyBzY2VuYXJpb3M6cmVhZCBzY2VuYXJpb3M6d3JpdGUiLCJqdGkiOiI2YmZjOWZkOS1iMTA4LTQzZDgtYTcxMi0yOGZmZDVmMjkyNzkiLCJzdWIiOjE2NzQwLCJ1c2VyIjp7ImlkIjoxNjc0MCwiYWRtaW4iOmZhbHNlLCJlbWFpbCI6InJ1eGFuZHJhLnNpbWlvbml1YzIyQGdtYWlsLmNvbSIsIm5hbWUiOiJSdXhhbmRyYSAifSwiZXhwIjoxNzkwMjgwNjg0fQ.R5HchFBEO-jB-yhCZHrDvA2duO5487uX8uErARnm0sFVWzLyBoLJxdce9Ikm7g7qrsickGnHAiT92jWf7dDBq-4nzXq84680siD3tVeE3MN5T5QihTxEtLtzg_XOTxGsyalwNWOJpfMSQKYw8_Db4pqBDfGphYA6JoipiBco-r0lnk1a0puKKhZzERsXf6taEnQsuW0v0cJpyp9yhzXuC8gYhzKtkX4PlIY96rT3KiGMnti78FkXcbfCqiNdeLFG6cTS7dz0AB4s-SxwDRlvlXL7nse-QNxb1mfvUMAR83vcs8EWww9isKG97m6QBgh3GNMP9BCYDTis0GnD9B30uQ'
@@ -123,7 +150,7 @@ year = '2030'
 #         print(f'Err pushing to ETM: {e}')  
 
 
-save_path = "/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/etm_push_29_07"
+save_path = "/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/etm_push_05_08"
 failed = []
 
 for scenario in ALL_SCENARIOS:

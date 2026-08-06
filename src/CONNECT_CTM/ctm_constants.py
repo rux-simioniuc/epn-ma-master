@@ -74,9 +74,9 @@ BOTTOM_UP_CATEGORIES = {
 
 TRANSFORMATION_OVERRIDES = {
     # refineries
-    "shell_pernis": "1",
-    "exxonmobil": "1",
-    "zeeland_refinery": "1",
+    # "shell_pernis": "1",
+    # "exxonmobil": "1",
+    # "zeeland_refinery": "1",
     
     # air separation
     "air_liquide": "1",
@@ -85,10 +85,28 @@ TRANSFORMATION_OVERRIDES = {
     "air_products_merseyweg": "1",
     
     # steam cracking
-    "shell_moerdijk": "1",
-    "dow": "1",
+    # "shell_moerdijk": "1",
+    # "dow": "1",
     "sabic": "1",
 }
+
+
+OVERRIDES = {
+    'shell_pernis&&transformation': 0,
+    'bp&&transformation': 0,
+    'exxonmobil&&transformation': 0,
+
+    'gunvor&&transformation': 0,
+    'vpr_energy&&transformation' : 0,
+    'zeeland_refinery&&transformation': 0,
+    
+    'shell_moerdijk&&transformation': 0,
+    'dow&&transformation': 0,
+
+    'other_chemicals&&chemelot&&cluster_site_other_chemicals_chemelot&&transformation': 0
+}
+
+
 
 ALL_SCENARIOS = [
     'Elektrificatie',
