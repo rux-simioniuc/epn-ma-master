@@ -1000,7 +1000,7 @@ disable_master_projects = not all([
     reference_utility,  
     project_emission, 
     project_utility, 
-    ]) or st.session_state.mapping.is_empty()
+    ]) or (st.session_state.mapping is None or st.session_state.mapping.is_empty())
 
 with st.sidebar.expander("Download helper files", expanded=False):
     if st.button('Generate Master util/emission File', use_container_width=True, disabled=disable_master):
