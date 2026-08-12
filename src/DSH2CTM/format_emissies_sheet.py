@@ -755,7 +755,9 @@ def write_scenario_sheets(
     n_scenarios: int = 5,
     ref_year: int = 2024,
     units: pl.DataFrame = None,
-    wb: Workbook = None
+    wb: Workbook = None,
+    scenario_names: dict[int, str]= SCENARIO_NAMES_DICT,
+    scenario_years: list[str] = SCENARIO_YEARS
 ):
     """
     Writes n_scenarios template sheets ("Scenario 1" … "Scenario n").
@@ -764,7 +766,6 @@ def write_scenario_sheets(
       - Single strategy placeholder "strategy" (merged across all years)
       - All emission and energy value cells empty
     """
-
     if wb is None:
         if existing_path:
             wb = load_workbook(existing_path)
@@ -801,13 +802,13 @@ def write_scenario_sheets(
     en_start = em_end + 1
     en_end   = en_start + len(energy_cols) - 1
  
-    year_cols  = SCENARIO_YEARS
+    year_cols  = scenario_years
     flow_types = FLOW_TYPES
  
     def build_sheet(ws, scenario_num: int, ref_data: list):
         # ── ROW 1: title ──────────────────────────────────────────────────
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3)
-        c = ws.cell(1, 1, f"Scenario {SCENARIO_NAMES_DICT[scenario_num]}")
+        c = ws.cell(1, 1, f"Scenario {scenario_names[scenario_num]}")
         style_cell(c, bold=True, size=14, align="left", fg=WHITE, bg=MID_BLUE)
         for col in range(2, 4):
             ws.cell(1, col).fill = hfill(MID_BLUE)
@@ -914,7 +915,6 @@ def write_scenario_sheets(
             if str(row["Year"]) == str(ref_year)
         }
         ref_start, _ = write_year_block(str(ref_year), "Reference", ref_rows, is_template=False)
- 
         # blank separator
         for col in range(1, en_end + 1):
             ws.cell(current_row, col).fill = hfill(WHITE)
@@ -964,7 +964,7 @@ def write_scenario_sheets(
  
     # ── write all scenario sheets ──────────────────────────────────────────
     for n in range(1, n_scenarios + 1):
-        sheet_name = f"Scenario {SCENARIO_NAMES_DICT[n]}"
+        sheet_name = f"Scenario {scenario_names[n]}"
         if sheet_name in wb.sheetnames:
             del wb[sheet_name]
         ws = wb.create_sheet(sheet_name)

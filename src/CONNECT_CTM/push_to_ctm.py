@@ -80,9 +80,9 @@ def construct_site_inputs(
         if 'peak' not in col:
             val = row_data.get(col)
             if val is not None and val != 0:  # Skip 0 and None
-                if val < 0:
-                    logs.append(f"    [SKIP NEG] {col}={val}")
-                    continue
+                # if val < 0:
+                #     logs.append(f"    [SKIP NEG] {col}={val}")
+                #     continue
                 ctm_col = energy_column_name(col, flow_type)
                 if ctm_col is None:
                     # logs.append(f"    [SKIP UNMAPPED] {col} (no CTM mapping)")
@@ -94,9 +94,9 @@ def construct_site_inputs(
         for col in emission_cols:
             val = row_data.get(col)
             if val is not None and val != 0:  # ← Skip 0 and None
-                if val < 0:
-                    logs.append(f"    [SKIP NEG] {col}={val}")
-                    continue
+                # if val < 0:
+                #     logs.append(f"    [SKIP NEG] {col}={val}")
+                #     continue
                 ctm_col = emission_column_name(col)
                 if ctm_col:
                     inputs[f"{sector}&&{cluster}&&{site}&&{ctm_col}"] = str(val)
@@ -143,9 +143,9 @@ def construct_bottom_up_inputs(
         if 'peak' not in col:
             val = row_data.get(col)
             if val is not None and val != 0:  # Skip 0 and None
-                if val < 0:
-                    logs.append(f"    [SKIP NEG] {col}={val}")
-                    continue
+                # if val < 0:
+                #     logs.append(f"    [SKIP NEG] {col}={val}")
+                #     continue
                 ctm_col = energy_column_name(col, flow_type)
                 if ctm_col is None:
                     # logs.append(f"    [SKIP UNMAPPED] {col} (no CTM mapping)")
@@ -157,9 +157,9 @@ def construct_bottom_up_inputs(
         for col in emission_cols:
             val = row_data.get(col)
             if val is not None and val != 0:  # Skip 0 and None
-                if val < 0:
-                    logs.append(f"    [SKIP NEG] {col}={val}")
-                    continue
+                # if val < 0:
+                #     logs.append(f"    [SKIP NEG] {col}={val}")
+                #     continue
                 ctm_col = emission_column_name(col)
                 if ctm_col:
                     inputs[f"{site}&&{ctm_col}"] = str(val)
@@ -216,9 +216,9 @@ def construct_custom_site_inputs(
         if 'peak' not in col:
             val = row_data.get(col)
             if val is not None and val != 0:  # Skip 0 and None
-                if val < 0:
-                    logs.append(f"    [SKIP NEG] {col}={val}")
-                    continue
+                # if val < 0:
+                #     logs.append(f"    [SKIP NEG] {col}={val}")
+                #     continue
                 ctm_col = energy_column_name(col, flow_type)
                 if ctm_col is None:
                     # logs.append(f"    [SKIP UNMAPPED] {col} (no CTM mapping)")
@@ -230,9 +230,9 @@ def construct_custom_site_inputs(
         for col in emission_cols:
             val = row_data.get(col)
             if val is not None and val != 0:  # Skip 0 and None
-                if val < 0:
-                    logs.append(f"    [SKIP NEG] {col}={val}")
-                    continue
+                # if val < 0:
+                #     logs.append(f"    [SKIP NEG] {col}={val}")
+                #     continue
                 ctm_col = emission_column_name(col)
                 if ctm_col:
                     inputs[f"{custom_site}&&{ctm_col}"] = str(val)
@@ -274,10 +274,10 @@ def construct_cluster_inputs(
     
     # Map utilities to CTM inputs
     for utility, value in cluster_data.items():
-        if value is None or value < 0:
-            if value is not None and value < 0:
-                logs.append(f"    [SKIP NEG] {cluster}/{utility}/{flow_type}={value}")
-            continue
+        # if value is None or value < 0:
+            # if value is not None and value < 0:
+            #     logs.append(f"    [SKIP NEG] {cluster}/{utility}/{flow_type}={value}")
+            # continue
         
         # Find CTM column name for this utility
         ctm_col = None
@@ -327,10 +327,10 @@ def construct_sector_inputs(
     
     # Map utilities to CTM inputs
     for utility, value in sector_data.items():
-        if value is None or value < 0:
-            if value is not None and value < 0:
-                logs.append(f"    [SKIP NEG] {sector}/{utility}/{flow_type}={value}")
-            continue
+        # if value is None or value < 0:
+        #     if value is not None and value < 0:
+        #         logs.append(f"    [SKIP NEG] {sector}/{utility}/{flow_type}={value}")
+        #     continue
         
         # Find CTM column name for this utility
         ctm_col = None

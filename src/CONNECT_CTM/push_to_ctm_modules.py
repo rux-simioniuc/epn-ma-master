@@ -114,7 +114,7 @@ def load_all_plants_scenario_data(
 
      # -- Process each workbook ------------------------------------------
     for wb_source, file_bytes in workbooks:
-        plant_name = Path(wb_source).stem if isinstance(wb_source, str) else str(wb_source).split('/')[-1].split('.')[0]
+        plant_name = Path(wb_source).stem if isinstance(wb_source, str) else str(wb_source).split('/')[-1].split('.xlsx')[0]
         try:
             # Find plant in mapping by name
             plant_match = mapping_df.filter(pl.col("DSH plant name") == plant_name)
@@ -603,7 +603,7 @@ def build_ctm_inputs_from_flexibility(
             if value is not None and value != 0:  # Skip None and 0
                 try:
                     val_float = float(value)
-                    if val_float <= 0:  # Skip 0 and negative
+                    if val_float == 0:  # Skip 0 and negative
                         # if val_float < 0:
                         #     logs.append(f"    [SKIP NEG] Flexibility {ctm_col}={val_float}")
                         continue
@@ -699,7 +699,8 @@ def push_aggregated_by_scenario_year(
     reuse_sessions: Optional[Dict[Tuple, str]] = None,
     selected_scenarios: list[str] = ALL_SCENARIOS,
     selected_years: list[str] = SCENARIO_YEARS,
-    session_path: str = ''
+    session_path: str = '',
+    log_container = None        # to paste logs in real time
 ) -> dict:
     """
     Main workflow: Load plants, group by scenario-year, build inputs, push to CTM.
@@ -728,6 +729,12 @@ def push_aggregated_by_scenario_year(
     all_errors = []
     sessions_created = {}
 
+    # Instead of print() or appending to logs list:
+    def log_message(msg):
+        all_logs.append(msg)
+        if log_container:
+            log_container.write(msg)
+
     custom_inputs = get_custom_ctm_inputs()
     
     all_logs.append(f"\n{'='*70}")
@@ -735,7 +742,7 @@ def push_aggregated_by_scenario_year(
     all_logs.append(f"{'='*70}\n")
     
     # Step 1: Load all plants
-    all_logs.append("STEP 1: Loading plants...")
+    log_message("STEP 1: Loading plants...")
     print("STEP 1: Loading plants...")
     all_scenario_data, scenario_year_groups, step_logs, step_errors = load_all_plants_scenario_data(
         plants_workbook_dir=plants_workbook_dir,
@@ -748,7 +755,7 @@ def push_aggregated_by_scenario_year(
     all_errors.extend(step_errors)
     
     if not all_scenario_data:
-        all_logs.append("[ERROR] No plants loaded")
+        log_message("[ERROR] No plants loaded")
         print("[ERROR] No plants loaded")
         return {
             "logs": all_logs,
@@ -763,7 +770,7 @@ def push_aggregated_by_scenario_year(
     sector_cluster_prod_df = None
     if cluster_sector_file is not None:
         try:
-            all_logs.append("STEP 1B: Loading and reshaping cluster/sector curves...")
+            log_message("STEP 1B: Loading and reshaping cluster/sector curves...")
             print("STEP 1B: Loading and reshaping cluster/sector curves...")
             if type(cluster_sector_file) == str:
                 # if it's a path
@@ -774,24 +781,24 @@ def push_aggregated_by_scenario_year(
 
             cluster_sector_df_long = cluster_sector_df_long_init.filter(~pl.col('Sector').is_in(['refineries', 'steel']))
             cluster_sector_df_long_EXTRA = cluster_sector_df_long_init.filter(pl.col('Sector').is_in(['refineries', 'steel']))
-            all_logs.append(f"  ✓ Reshaped cluster/sector data: {len(cluster_sector_df_long)} rows")
+            log_message(f"  ✓ Reshaped cluster/sector data: {len(cluster_sector_df_long)} rows")
         except Exception as e:
-            all_logs.append(f"[ERROR] Failed to load cluster-sector data: {e}")
+            log_message(f"[ERROR] Failed to load cluster-sector data: {e}")
             all_errors.append(str(e))
             print(f"[ERROR] Failed to load cluster-sector data: {e}")
 
 
         try:
-            all_logs.append("STEP 1C: Loading and reshaping cluster/sector curves for production...")
+            log_message("STEP 1C: Loading and reshaping cluster/sector curves for production...")
             print("STEP 1C: Loading and reshaping cluster/sector curves for production...")
             if cluster_sector_production is None:
                 sector_cluster_prod_df  = read_production_table_curves(workbook_path=cluster_sector_file, sheet_name=cluster_sector_production_sheet_name)
             else:
                 sector_cluster_prod_df  = read_production_table_curves(curves_df=cluster_sector_production)
 
-            all_logs.append(f"  ✓ Production cluster/sector data: {len(sector_cluster_prod_df )} rows")
+            log_message(f"  ✓ Production cluster/sector data: {len(sector_cluster_prod_df )} rows")
         except Exception as e:
-            all_logs.append(f"[ERROR] Failed to load cluster-sector production data: {e}")
+            log_message(f"[ERROR] Failed to load cluster-sector production data: {e}")
             all_errors.append(str(e))
             print(f"[ERROR] Failed to load cluster-sector production data: {e}")
 
@@ -799,7 +806,7 @@ def push_aggregated_by_scenario_year(
     
     # Step 2: Process each scenario-year combo
     num_scenarios = len(selected_scenarios) * len(selected_years)
-    all_logs.append(f"\nSTEP 2: Processing {num_scenarios} scenario-year combos...")
+    log_message(f"\nSTEP 2: Processing {num_scenarios} scenario-year combos...")
     print(f"\nSTEP 2: Processing {num_scenarios} scenario-year combos...")
 
     for (scenario, year), plants_in_year in sorted(scenario_year_groups.items()):
@@ -812,7 +819,7 @@ def push_aggregated_by_scenario_year(
             reuse_sid = None
             if reuse_sessions and scenario_key in reuse_sessions:
                 reuse_sid = reuse_sessions[scenario_key]
-                all_logs.append(f"  Reusing session: {reuse_sid}")
+                log_message(f"  Reusing session: {reuse_sid}")
             
             try:
                 if reuse_sid:
@@ -822,9 +829,9 @@ def push_aggregated_by_scenario_year(
                     ctm = CTMClient(use_beta=use_beta)
                     reuse_sid = ctm.create_clean_sheet_session()
                 
-                all_logs.append(f"  Session: {reuse_sid}")
+                log_message(f"  Session: {reuse_sid}")
             except Exception as e:
-                all_logs.append(f"  [ERROR] {e}")
+                log_message(f"  [ERROR] {e}")
                 all_errors.append(str(e))
                 print(f"  [ERROR] {e}")
                 continue
@@ -855,7 +862,7 @@ def push_aggregated_by_scenario_year(
                         all_inputs.update(cluster_inputs)
                         all_logs.extend(cluster_logs)
                 except Exception as e:
-                    all_logs.append(f"[ERROR] Cluster/sector: {e}")
+                    log_message(f"[ERROR] Cluster/sector: {e}")
 
             if cluster_sector_df_long_EXTRA is not None:
                 try:
@@ -871,7 +878,7 @@ def push_aggregated_by_scenario_year(
                         all_inputs.update(cluster_inputs)
                         all_logs.extend(cluster_logs)
                 except Exception as e:
-                    all_logs.append(f"[ERROR] Cluster/sector: {e}")
+                    log_message(f"[ERROR] Cluster/sector: {e}")
             
             # Add sector/cluster production
             if sector_cluster_prod_df is not None:
@@ -893,7 +900,7 @@ def push_aggregated_by_scenario_year(
 
             # add custom inputs
             all_inputs.update(custom_inputs)
-            all_logs.append(f"Added {len(custom_inputs)} custom inputs")
+            log_message(f"Added {len(custom_inputs)} custom inputs")
 
 
             ### Add hardcoded overrides
@@ -904,14 +911,14 @@ def push_aggregated_by_scenario_year(
                 try:
                     ctm.set_inputs(all_inputs)
                     sessions_created[scenario_key] = reuse_sid
-                    all_logs.append(f"  ✓ Pushed {len(all_inputs)} total inputs")
+                    log_message(f"  ✓ Pushed {len(all_inputs)} total inputs")
                     print(f"  ✓ Pushed {len(all_inputs)} total inputs")
                 except Exception as e:
                     all_errors.append(f"Failed to push: {e}")
-                    all_logs.append(f"  [ERROR] {e}")
+                    log_message(f"  [ERROR] {e}")
                     print(f"Failed to push: {e}")
             else:
-                all_logs.append(f"  [SKIP] No valid inputs")
+                log_message(f"  [SKIP] No valid inputs")
 
 
             inputs_path = Path(session_path)
@@ -922,13 +929,13 @@ def push_aggregated_by_scenario_year(
             print(f'--------- done with {scenario} {year} ----------')
     
     # Step 3: Summary
-    all_logs.append(f"\n{'='*70}")
-    all_logs.append("SUMMARY:")
-    all_logs.append(f"  Plants loaded: {len(all_scenario_data)}")
-    all_logs.append(f"  Scenario-year-flow combos: {len(scenario_year_groups)}")
-    all_logs.append(f"  Sessions created: {len(sessions_created)}")
-    all_logs.append(f"  Errors: {len(all_errors)}")
-    all_logs.append(f"{'='*70}\n")
+    log_message(f"\n{'='*70}")
+    log_message("SUMMARY:")
+    log_message(f"  Plants loaded: {len(all_scenario_data)}")
+    log_message(f"  Scenario-year-flow combos: {len(scenario_year_groups)}")
+    log_message(f"  Sessions created: {len(sessions_created)}")
+    log_message(f"  Errors: {len(all_errors)}")
+    log_message(f"{'='*70}\n")
 
     print(f"\n{'='*70}")
     print("SUMMARY:")

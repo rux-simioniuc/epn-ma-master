@@ -238,6 +238,8 @@ def read_all_scenario_sheets(
         for sheet in wb.sheetnames
         if sheet.startswith("Scenario ")
     ]
+
+    wb.close()
  
     dfs = [
         read_scenario_sheet(

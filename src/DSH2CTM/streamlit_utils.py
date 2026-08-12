@@ -24,7 +24,7 @@ from .format_emissies_sheet import (write_energy_balance_sheet,
                                     write_scenario_sheets, 
                                     write_storage_sheet)
 
-from CONNECT_CTM.read_DSH_files import read_all_scenario_sheets
+# from CONNECT_CTM.read_DSH_files import read_all_scenario_sheets
 
 def read_csv_streamlit(streamlit_file) -> pl.DataFrame:
     """Read a CSV via pandas, falling back to Polars for malformed files."""
@@ -57,6 +57,12 @@ def process_plant_streamlit(
     plant_id: str, 
     data: dict[str, pl.DataFrame],
     logs: list = None,
+    reference_year: int = 2024,
+    n_scenarios: int = 5,
+    scenario_names: list[str]=[],
+    scenario_years: list[str] = [],
+    log_container = None
+
 ) -> tuple[io.BytesIO, list]:
     """
     Process a single plant and generate Excel in memory.
@@ -72,9 +78,16 @@ def process_plant_streamlit(
     
     if logs is None:
         logs = []
+
+    # Instead of print() or appending to logs list:
+    def log_message(msg):
+        logs.append(msg)
+        if log_container:
+            log_container.write(msg)
+    
     
     plant_name = get_plant_name(data["plants"], plant_id)
-    logs.append(f"Processing: {plant_name}")
+    log_message(f"Processing: {plant_name}")
     
     try:
         # Get units
@@ -90,7 +103,7 @@ def process_plant_streamlit(
             data["demand_forecast"],
             data["demand_reference"],
             plant_id,
-            REFERENCE_YEAR,
+            reference_year,
         )
         
         details = create_company_details_dfs(
@@ -104,6 +117,11 @@ def process_plant_streamlit(
             data["project_utilities"],
             plant_id,
         )
+
+        scenario_names_dict = {
+            i: scenario
+            for i, scenario in enumerate(scenario_names, start=1)
+        }
         
         production = get_production_sheet(data["production"], plant_id)
         storage = get_storage_sheet(data["storage"], plant_id)
@@ -120,19 +138,26 @@ def process_plant_streamlit(
         wb = write_production_sheet(production, wb=wb)
         wb = write_storage_sheet(storage, wb=wb)
         wb = write_flexibility_sheet(flexibility, wb=wb)
-        wb = write_scenario_sheets(energy_balance, wb=wb, units=units)
+        wb = write_scenario_sheets(energy_balance, 
+                                   wb=wb, 
+                                   units=units,
+                                   n_scenarios=n_scenarios,
+                                   scenario_names=scenario_names_dict,
+                                   scenario_years=scenario_years,
+                                   ref_year=reference_year)
         
         # ── Save to BytesIO ────────────────────────────────────────────
         excel_bytes = io.BytesIO()
         wb.save(excel_bytes)
+        wb.close()
         excel_bytes.seek(0)
         
-        logs.append(f"  Generated: {plant_name}.xlsx")
+        log_message(f"  Generated: {plant_name}.xlsx")
         
         return excel_bytes, logs
     
     except Exception as e:
-        logs.append(f"  ERROR: {plant_name}: {e}")
+        log_message(f"  ERROR: {plant_name}: {e}")
         return None, logs
 
 
@@ -186,6 +211,8 @@ def extract_scenario_years(streamlit_file) -> tuple[list[str], list[str]]:
             years = sorted(years)
         else:
             years = []
+
+        wb.close()
         
         return sorted(scenarios), years
     

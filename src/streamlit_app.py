@@ -10,9 +10,10 @@ from datetime import datetime
 import zipfile
 import io
 import polars as pl
-import pandas as pd
 import ast
 import copy
+import gc
+import psutil
 
 import sys
 from pathlib import Path
@@ -24,7 +25,30 @@ sys.path.insert(0, str(src_path))
 
 # from DSH2CTM.main import read_csv
 from DSH2CTM.streamlit_utils import *
-from CONNECT_CTM.utils import push_ctm_scenario_to_etm, get_master_emissions_utilities, get_master_projects
+from CONNECT_CTM.utils import push_ctm_scenario_to_etm, get_master_emissions_utilities, get_master_projects, read_and_transform_mapping, normalize_sector_cluster_mapping
+from CONNECT_CTM.push_to_ctm_modules import push_aggregated_by_scenario_year
+from CONNECT_CTM.constants import EMISSION_COLS_ORDER, UTILITY_COLS_ORDER
+from CONNECT_CTM.ctm_constants import TRANSFORMATION_OVERRIDES 
+
+# Periodically clear memory
+def clear_session_cache():
+    """Clear unnecessary session state."""
+    keys_to_clear = [
+        'generated_files',  # Remove if not needed
+        'excel_data',       # Remove after processing
+        'dsh_logs',         # Keep only last N logs
+    ]
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+    gc.collect()
+
+def show_memory_usage():
+    process = psutil.Process()
+    mem_mb = process.memory_info().rss / 1024 / 1024
+    st.sidebar.metric("Memory Usage", f"{mem_mb:.0f} MB")
+
+show_memory_usage()
 
 
 # ── Page config ────────────────────────────────────────────────────────
@@ -39,8 +63,8 @@ st.set_page_config(
 if "etm_token" not in st.session_state:
     st.session_state.etm_token = ""
 
-if "etm_scenario_id" not in st.session_state:
-    st.session_state.etm_scenario_id = ""
+# if "etm_scenario_id" not in st.session_state:
+#     st.session_state.etm_scenario_id = ""
 
 if "ctm_sessions" not in st.session_state:
     st.session_state.ctm_sessions = {}
@@ -61,9 +85,11 @@ st.sidebar.markdown("### Credentials (Cached)")
 with st.sidebar.expander("ETM Settings", expanded=False):
     etm_token = st.text_input(
         "ETM Authorization Token",
-        value=st.session_state.etm_token,
-        type="password",
+        # value=st.session_state.etm_token,
+        value = 'etm_eyJraWQiOiJkODI5ZTk3YTU4ZDhhOTQyYjg3NGI5ZjNiZWI3ZDJlNGY0MTA5ZjIzNWE0Y2NhMDkzYmU5MzFiMzY1NTlkNGI2IiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiJodHRwczovL215LmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20iLCJpYXQiOjE3ODUzMTI5NDUsImF1ZCI6Imh0dHBzOi8vZW5naW5lLmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20gaHR0cHM6Ly8yMDI1LTAxLmVuZ2luZS5lbmVyZ3l0cmFuc2l0aW9ubW9kZWwuY29tIiwic2NvcGVzIjoib3BlbmlkIHB1YmxpYyBzY2VuYXJpb3M6cmVhZCBzY2VuYXJpb3M6d3JpdGUiLCJqdGkiOiJjMjZkZWI5Zi05YTM3LTQ3OWQtYjUxYy0zZDM3M2Q3YjE4NmUiLCJzdWIiOjE2NzcyLCJ1c2VyIjp7ImlkIjoxNjc3MiwiYWRtaW4iOmZhbHNlLCJlbWFpbCI6InJ1eGFuZHJhLnNpbWlvbml1Y0B0ZW5uZXQuZXUiLCJuYW1lIjoiUnV4In0sImV4cCI6MTc4NzkwNDk0NX0.tpO0EXw7tFiRrySA3V9HPTw6EDEd2g7RCydM6VOTg2E3LLE3jq9dxRUziz6nZnFAQS_5DJniSAoABbePtDkY9qKOd-vmUTJEyM63COxUxlaJ5Q8NmISJNXVYnj-vsqcjXVO64CzByCx6WVUE9VJh2Gp228hehjjE_HzpLXvonFGQY3pNV92RnFw4rhJAwCE2uWs8_sn1r2Fs9lrAQXNeWKbTUjArmOTMYM-F1ZoqDjnCsdIeEhoKRMI1aNZqauDjH6eSSjy4ltK7dRivwRew0OO8bzfqd7QW6yyZjbhBEH6WzLICwZVQO1zOoH-sxYgmwwenFOYo218fifLZWH8UHg',
+        # type="password",
         key="etm_token_input",
+
     )
     if etm_token:
         st.session_state.etm_token = etm_token
@@ -285,6 +311,65 @@ with tab1:
     
         st.divider()
 
+    with st.expander("Scenario Settings", expanded=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            scenario_amount = st.number_input(
+                label='Number of scenarios',
+                value=5,
+                min_value=0,
+                key='scenario_amount'
+                )
+
+            scenario_names = st.text_input(
+                label='Scenario names',
+                value='Elektrificatie, Midden, VT, Groen gas, Waterstof',
+                help='Input the names separated by a comma',
+                key='scenario_names'
+                )
+            try:
+                scenario_names_list = [
+                    name.strip()
+                    for name in scenario_names.split(',')
+                    if name.strip()
+                ]
+                if len(scenario_names_list) != scenario_amount:
+                    raise Exception(f"Amount of names ({len(scenario_names_list)}) inconsistent with the number of scenarios ({scenario_amount}).")
+            except Exception as e:
+                st.error(f'[ERR] Error processing scenario names: {e}')
+
+            
+        with col2:
+            reference_year = st.number_input(
+                label='Reference year',
+                value=2024,
+                key='reference_year',
+                min_value=2010,
+                max_value=2100,
+                help='must be between 2010 and 2100'
+            )
+
+
+            scenario_years = st.text_input(
+                label='Scenario years',
+                value='2030, 2035, 2040, 2050',
+                help='Input the years separated by a comma',
+                key='scenario_years'
+                )
+
+            try:
+                scenario_years_list = [
+                    year.strip()
+                    for year in scenario_years.split(',')
+                    if year.strip()
+                ]
+                test_int_list = [int(x) for x in scenario_years_list]
+            except Exception as e:
+                st.error(f'[ERR] parsing scenario years: {e}')
+
+        st.divider()
+
     st.markdown("### Generate plant excels")   
 
     if not all([plant_export, 
@@ -330,6 +415,8 @@ with tab1:
         if st.button("Generate plant files", type="primary"):
             st.session_state.generated_files = {}
             st.session_state.dsh_logs = []
+            st.markdown("### Generation Logs")
+            log_container = st.container(border=True, height=200)
             
             with st.spinner("Loading data..."):
                 try:
@@ -361,15 +448,18 @@ with tab1:
                                 plant_id=plant_id,
                                 data=data,
                                 logs=st.session_state.dsh_logs,
+                                n_scenarios=scenario_amount,
+                                scenario_names=scenario_names_list,
+                                scenario_years=scenario_years_list,
+                                reference_year=reference_year,
+                                log_container=log_container
                             )
-
 
                             if excel_bytes:
                                 
                                 file_name = f"{plant_name}.xlsx"
                                 st.session_state.generated_files[file_name] = excel_bytes.getvalue()
                             
-                                # st.write(f'Done with {plant_name}')
                                 print(f'Done with {plant_name}')
                             else:
                                 st.write(f"Failed for {plant_name}.")
@@ -380,13 +470,6 @@ with tab1:
                     st.error(f"Error: {e}")
                     st.session_state.dsh_logs.append(f"ERROR: {e}")
                 
-        # Show logs if available
-        if st.session_state.dsh_logs:
-            st.markdown("### Generation Logs")
-            with st.container(border=True, height=150):  
-                for log_line in st.session_state.dsh_logs:
-                    st.text(log_line)
-                    
         # Download options
         if st.session_state.generated_files:
             st.markdown("### Download Generated Files")
@@ -443,10 +526,12 @@ with tab2:
         st.session_state.scenario_years = None
     if 'production_curves_df' not in st.session_state:
         st.session_state.production_curves_df = None
-    if 'session_json' not in st.session_state:
-        st.session_state.session_json = None
+    if 'ctm_sessions' not in st.session_state:
+        st.session_state.ctm_sessions = None
     # if 'plant_files' not in st.session_state:
     #     st.session_state.plant_files = None
+
+    len_plants = 0
 
 
     st.markdown("## CTM Session Management & ETM Coupling")
@@ -468,6 +553,7 @@ with tab2:
             )
             if plant_files:
                 st.success(f"✓ {len(plant_files)} files uploaded")  
+                len_plants = len(plant_files)
                 # st.session_state.plant_files = plant_files                    
         with col2:
             st.markdown("### Mapping File")
@@ -481,7 +567,6 @@ with tab2:
             if mapping_file:
                 if st.button('Load and process mapping file', type='primary'):
                     try:
-                        from CONNECT_CTM.utils import read_and_transform_mapping, normalize_sector_cluster_mapping
 
                         if mapping_file.name.split('.')[-1] == 'csv':
                             st.session_state.mapping = read_csv_streamlit(mapping_file)
@@ -565,25 +650,69 @@ with tab2:
 
             if not create_new:
                 st.markdown("### Load Existing Sessions")
-                st.session_state.session_json = st.text_area(
-                    "Paste session IDs (JSON format)",
+                st.markdown("##### Direct pasting has priority.")
+
+                sessions = {}
+                
+                ctm_sessions_file = st.file_uploader(
+                    "Upload ctm session mapping file",
+                    type=["json"],
+                    key="ctm_sessions_file",
+                    accept_multiple_files=False
+                    )
+
+                # Option 1: Upload JSON file
+                if ctm_sessions_file is not None:
+                    try:
+                        data = json.load(ctm_sessions_file)
+
+                        sessions = {
+                            ast.literal_eval(k): v
+                            for k, v in data.items()
+                        }
+
+                        st.success(f"{len(sessions)} session IDs uploaded successfully!")
+
+                    except Exception as e:
+                        st.error(f"Could not read the file: {e}")
+
+
+                # Option 2: Paste session IDs
+                pasted_sessions = st.text_area(
+                    "OR paste session IDs",
                     height=185,
-                    help='{("Scenario", "Year"): "SE-xxxxx", \n("Scenario", "Year"): "SE-xxxxx"}',
+                    # help="Accepts JSON or Python dict format",
+                    help='{("Scenario", "Year"): "SE-xxxxx"} OR {\'("Scenario", "Year")\': "SE-xxxxx"}',
                 )
 
-                if len(st.session_state.session_json) > 0:
+                if pasted_sessions.strip():
                     try:
-                        st.session_state.session_json = ast.literal_eval(st.session_state.session_json)
+                        data = ast.literal_eval(pasted_sessions)
+
+                        sessions = {
+                            (k if isinstance(k, tuple) else ast.literal_eval(k)): v
+                            for k, v in data.items()
+                        }
+
+                        st.success(f"{len(sessions)} session IDs pasted successfully!")
+
                     except Exception as e:
-                        st.error(f'Could not process IDs: {e}')
+                        st.error(f"Could not process IDs: {e}")
+
+
+                if sessions:
+                    st.session_state.ctm_sessions = sessions
+
 
     # ── Step 3: Push to CTM ────────────────────────────────────────────
     if "result" not in st.session_state:
         st.session_state.result = None
     if "selected_scenarios" not in st.session_state:
-            st.session_state.selected_scenarios = None
+        st.session_state.selected_scenarios = None
     if "selected_years" not in st.session_state:
-            st.session_state.selected_years = None
+        st.session_state.selected_years = None
+    if "etm_session_json" not in st.session_state:
+        st.session_state.etm_session_json = None
 
     with st.expander("Step 3: Push to CTM", expanded=False):
         #TODO add some curve + mapping validation here
@@ -607,12 +736,10 @@ with tab2:
             disabled_button = False
 
 
-        if st.button("Start CTM Push", type="primary", disabled=disabled_button):
+        if st.button("Push to CTM", type="primary", disabled=disabled_button):
+            log_container = st.container(border=True, height=300)
             # st.info("Push process would start here...")
             try:
-                from CONNECT_CTM.push_to_ctm_modules import push_aggregated_by_scenario_year
-                from CONNECT_CTM.constants import EMISSION_COLS_ORDER, UTILITY_COLS_ORDER
-                from CONNECT_CTM.ctm_constants import TRANSFORMATION_OVERRIDES 
                 with st.spinner("Processing..."):
 
                     st.session_state.result = push_aggregated_by_scenario_year(
@@ -623,34 +750,41 @@ with tab2:
                         transformation_overrides=TRANSFORMATION_OVERRIDES,
                         cluster_sector_file=st.session_state.main_curves_df,
                         cluster_sector_production=st.session_state.production_curves_df,
-                        reuse_sessions=st.session_state.session_json,
+                        reuse_sessions=st.session_state.ctm_sessions,
                         selected_scenarios=st.session_state.selected_scenarios,
                         use_beta=st.session_state.use_beta,
                         reference_year=st.session_state.ref_year,
-                        selected_years=st.session_state.selected_years
+                        selected_years=st.session_state.selected_years,
+                        log_container=log_container
                     )
 
                     # print(st.session_state.result)
             except Exception as e:
                 st.error(f'Error: {e}')
-        
-        # Show logs
-    
+
+        # Show logs    
         if st.session_state.result is not None:    
-            st.markdown("### Logs")
-            with st.container(border=True, height=150):
-                for log_line in st.session_state.result['logs']:
-                    st.text(log_line)
             st.markdown("### Sessions")
             with st.container(border=True, height=150):
                 st.text('{')
                 for k, v in st.session_state.result['sessions'].items():
                     st.text(f'{k}: \'{v}\',')
                 st.text('}')
-            st.markdown("### Errors")
-            with st.container(border=True, height=150):
-                for errors_log in st.session_state.result['errors']:
-                    st.text(errors_log)
+            # if st.button("Export Session IDs"):
+
+            sessions = st.session_state.result["sessions"]
+
+            session_json = json.dumps(
+                {str(key): value for key, value in sessions.items()},
+                indent=2
+            )
+
+            st.download_button(
+                label="Download sessions.json",
+                data=session_json,
+                file_name=f"ctm_sessions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+            )
 
         
     # ── Step 4: Push to ETM ────────────────────────────────────────────
@@ -658,8 +792,8 @@ with tab2:
         
         if not st.session_state.etm_token:
             st.warning("⚠️ ETM token not set. Add it in the sidebar first.")
-        elif not st.session_state.etm_scenario_id:
-            st.warning("⚠️ ETM Scenario ID not set. Add it in the sidebar first.")
+        # elif not st.session_state.etm_scenario_id:
+        #     st.warning("⚠️ ETM Scenario ID not set. Add it in the sidebar first.")
         else:
             st.success("✓ Credentials ready")
 
@@ -668,80 +802,151 @@ with tab2:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("### Load Existing Sessions")
-            st.session_state.etm_session_json = st.text_area(
-                "Paste session IDs (JSON format)",
-                height=150,
-                help='{("Scenario", "Year"): "XXXXXXX"}',
+            st.markdown("### Load ETM Sessions")
+
+            sessions = {}
+                            
+            etm_sessions_file = st.file_uploader(
+                "Upload etm session mapping file",
+                type=["json"],
+                key="etm_sessions_file",
+                accept_multiple_files=False
+                )
+
+            # Option 1: Upload JSON file
+            if etm_sessions_file is not None:
+                try:
+                    data = json.load(etm_sessions_file)
+
+                    sessions = {
+                        ast.literal_eval(k): v
+                        for k, v in data.items()
+                    }
+
+                    st.success(f"{len(sessions)} ETM session IDs uploaded successfully!")
+
+                except Exception as e:
+                    st.error(f"Could not read the file: {e}")
+
+
+            # Option 2: Paste session IDs
+            pasted_etm_sessions = st.text_area(
+                "OR paste session IDs",
+                height=185,
+                # help="Accepts JSON or Python dict format",
+                help='{("Scenario", "Year"): "xxxxx"} OR {\'("Scenario", "Year")\': "xxxxx"}',
             )
 
-            if len(st.session_state.etm_session_json) > 0:
+            if pasted_etm_sessions.strip():
                 try:
-                    st.session_state.etm_session_json = ast.literal_eval(st.session_state.etm_session_json)
-                    st.success("Session IDs are formatted correctly.")
-                except Exception as e:
-                    st.error(f'Error processing the session IDs: {e}')
+                    data = ast.literal_eval(pasted_etm_sessions)
 
+                    sessions = {
+                        (k if isinstance(k, tuple) else ast.literal_eval(k)): v
+                        for k, v in data.items()
+                    }
+
+                    err = 0
+
+                    for k, v in sessions.items():
+                        if 'SE' in v or len(v) != 7:
+                            st.error('IDs do not match the ETM pattern: must have 7 digits and must NOT contain SE')
+                            err = 1
+                            continue
+                    if err == 0:
+                        st.success(f"{len(sessions)} session IDs pasted successfully!")
+
+                except Exception as e:
+                    st.error(f"Could not process IDs: {e}")
+
+
+            if sessions:
+                st.session_state.etm_session_json = sessions
 
             # use_beta_etm = st.checkbox("Use CTM Beta for ETM coupling", value=True)
             retry_failed = st.checkbox("Retry failed sessions", value=False)
         
         with col2:
             max_retries = st.slider("Max retries per session", 1, 5, 3)
+
+        success_push = 0
+        failed_push = 0
         
         if st.button("Couple to ETM", type="primary"):
             st.session_state.push_logs = []
             if st.session_state.etm_token and st.session_state.etm_session_json:
 
                 st.markdown("### Logs")
-                with st.container(border=True, height=150):
+                log_container = st.container(border=True, height=300)
 
-                    for (scenario, year) in st.session_state.session_json.keys():
-                        # for year in []:
-                        ctm_session = st.session_state.session_json[(scenario, year)]
+                for (scenario, year) in st.session_state.ctm_sessions.keys():
+                    ctm_session = st.session_state.ctm_sessions[(scenario, year)]
 
-                        etm_session = st.session_state.etm_session_json[(scenario, year)]
+                    etm_session = st.session_state.etm_session_json[(scenario, year)]
 
-                        st.session_state.push_logs.append(f"Pushing {scenario} {year}; CTM {ctm_session} to ETM {etm_session}")
-                        st.text(f"Pushing {scenario} {year}; CTM {ctm_session} to ETM {etm_session}")
+                    msg = f"Pushing {scenario} {year}; CTM {ctm_session} to ETM {etm_session}"
+                    st.session_state.push_logs.append(msg)
+                    log_container.text(msg)
 
+                    # Retry loop
+                    aux_result = None
+                    for attempt in range(max_retries):
                         try:
-                            aux_result = push_ctm_scenario_to_etm(ctm_session, etm_session, st.session_state.etm_token)
-                            st.text(f"Done")
-                            st.write(aux_result)
+                            aux_result = push_ctm_scenario_to_etm(
+                                ctm_session, 
+                                etm_session, 
+                                st.session_state.etm_token,
+                                log_container=log_container
+                            )
+                            
+                            if aux_result is not None:
+                                log_container.text(f"✓ Success on attempt {attempt + 1}")
+                                # st.session_state.push_logs.append(f"✓ Success")
+                                break  # Exit retry loop on success
+                            else:
+                                if attempt < max_retries - 1:  # Don't log on last attempt
+                                    log_container.text(f"✗ Failed attempt {attempt + 1}, retrying...")
+                                    import time
+                                    time.sleep(1)  # ← Add delay between retries
+                                else:
+                                    log_container.text(f"✗ Failed after {max_retries} attempts")
+                                    st.session_state.push_logs.append(f"✗ Failed after {max_retries} retries")
+                        
                         except Exception as e:
-                            st.text(f"[ERROR]: {e}")
-                            st.session_state.push_logs.append(f"[ERROR]: {e}")
-                
-                st.markdown("### Logs")
-                with st.container(border=True, height=150):
-                    for log_line in st.session_state.push_logs:
-                        st.text(log_line)
+                            if attempt < max_retries - 1:
+                                log_container.text(f"[ERROR] Attempt {attempt + 1}: {e}, retrying...")
+                                import time
+                                time.sleep(1)
+                            else:
+                                log_container.text(f"[ERROR] Failed after {max_retries} attempts: {e}")
+                                st.session_state.push_logs.append(f"[ERROR]: {e}")
+                    
+                    if aux_result is None:
+                        log_container.text(f"✗ {scenario}/{year} FAILED")
+                        fail_push += 1
+                    else:
+                        log_container.text(f"✓ {scenario}/{year} SUCCESS")
+                        success_push += 1
 
-                # with st.spinner("Coupling sessions to ETM..."):
-                #     # Placeholder for actual ETM coupling logic
-                #     st.session_state.push_logs.append("Coupling to ETM...")
-                #     st.session_state.push_logs.append("✓ 13/20 sessions coupled successfully")
-                #     st.session_state.push_logs.append("✗ 7 sessions failed (502 errors)")
             else:
                 st.error("Missing credentials!")
-    
+
     # ── Summary ────────────────────────────────────────────────────────
     st.divider()
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("Plants Processed", "92")
+        st.metric("Plants Processed", len_plants)
     
     with col2:
-        st.metric("CTM Sessions", "20")
+        st.metric("CTM Sessions", len(st.session_state.ctm_sessions or {}))
     
     with col3:
-        st.metric("ETM Coupled", "13/20")
+        st.metric("ETM Coupled", f"{success_push}/{len(st.session_state.etm_session_json or {})}")
     
     with col4:
-        st.metric("Status", "Pending")
-    
+        st.metric("ETM Failed", f"{failed_push}/{len(st.session_state.etm_session_json or {})}")
+
     # ── Export results ─────────────────────────────────────────────────
     st.divider()
     st.markdown("### Export Results")
@@ -759,27 +964,37 @@ with tab2:
             )
     
     with col2:
-        if st.button("Export Session IDs"):
-            session_json = json.dumps(st.session_state.ctm_sessions, indent=2)
+
+        if len(st.session_state.etm_session_json or {}) > 0:
+
+            session_json = json.dumps(
+                {str(key): value for key, value in st.session_state.etm_session_json.items()},
+                indent=2
+            )
+
             st.download_button(
-                label="Download sessions.json",
+                label="Download etm_sessions.json",
                 data=session_json,
-                file_name=f"sessions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                file_name=f"etm_sessions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json",
             )
     
     with col3:
         if st.button("Clear Cache"):
-            st.session_state.push_logs = []
-            st.session_state.ctm_sessions = {}
+            # st.session_state.push_logs = []
+            # st.session_state.ctm_sessions = {}
+            # st.session_state.mapping = None
+            # st.session_state.ref_year = None
+            # st.session_state.ctm_sessions = {}
+            clear_session_cache()
             st.success("Cache cleared")
-
+            # gc.collect()
 
 #''' Extra sidetab '''
 
 st.sidebar.markdown("### Extra options")
 
-disable_master = (not plant_files or st.session_state.mapping.is_empty())
+disable_master = (not plant_files or st.session_state.mapping is None or st.session_state.mapping.is_empty())
 disable_master_projects = not all([
     reference_emissions, 
     reference_utility,  
@@ -790,32 +1005,52 @@ disable_master_projects = not all([
 with st.sidebar.expander("Download helper files", expanded=False):
     if st.button('Generate Master util/emission File', use_container_width=True, disabled=disable_master):
         try:
-
-            excel_files_dict = {}
-            for uploaded_file in plant_files:
-                file_name = uploaded_file.name
+            master = None
+            log_area = st.empty()
+            
+            # Process files ONE at a time
+            for i, uploaded_file in enumerate(plant_files):
+                log_area.text(f"Processing {i+1}/{len(plant_files)}: {uploaded_file.name}")
+                
                 file_bytes = uploaded_file.read()
-                excel_files_dict[file_name] = file_bytes
-
-
-            master = get_master_emissions_utilities(
-                mapping_df=st.session_state.mapping,
-                excel_files_dict = excel_files_dict,
-                reference_year = st.session_state.ref_year
+                
+                # Pass SINGLE file dict
+                chunk = get_master_emissions_utilities(
+                    mapping_df=st.session_state.mapping,
+                    excel_files_dict={uploaded_file.name: file_bytes},  # ← Single file
+                    reference_year=st.session_state.ref_year
                 )
+                
+                # Combine results
+                if chunk is not None and not chunk.is_empty():
+                    if master is None:
+                        master = chunk
+                    else:
+                        master = pl.concat([master, chunk], how="vertical_relaxed")
+                
+                # Clear memory
+                del file_bytes
+                del chunk
+                gc.collect()
+            
             if master is not None:
-                # Convert to bytes
                 buffer = io.BytesIO()
                 master.write_excel(buffer)
                 buffer.seek(0)
-                excel_bytes_master = buffer.getvalue()
                 
                 st.download_button(
                     label="Download master_emission_utilities.xlsx",
-                    data=excel_bytes_master,
+                    data=buffer.getvalue(),
                     file_name="master_emission_utilities.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
+                
+                # Clear
+                del master
+                del buffer
+                gc.collect()
+                log_area.text("✓ Complete!")
+                
         except Exception as e:
             st.error(f'[ERROR]: {e}')
 
@@ -850,7 +1085,6 @@ with st.sidebar.expander("Download helper files", expanded=False):
         
     if disable_master_projects:
         st.warning('mapping, DSH files (reference + projects)', title='Upload files')  
-
 
 
 # ── Footer ─────────────────────────────────────────────────────────────

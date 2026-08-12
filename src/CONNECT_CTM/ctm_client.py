@@ -271,7 +271,7 @@ class CTMClient:
         })
         return data.get("output_values", {})
 
-    # ── ETM coupling (for later) ───────────────────────────────────────────
+    # ── ETM coupling ───────────────────────────────────────────
 
     def couple_etm(self, etm_scenario_id: str = None, etm_session_id: str = None,
                    auth_token: str = None):

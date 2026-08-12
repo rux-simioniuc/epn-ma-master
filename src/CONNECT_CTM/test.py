@@ -76,41 +76,41 @@ SCENARIOS_iter = [
 #                                         save_file=True,
 #                                         save_path='',
 #                                         normalize_sector_cluster=True)
-mapping_df = pl.read_csv('/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm/input/mapping.csv')
+mapping_df = pl.read_csv('/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm_sprint_3/mapping.csv')
 
 i = 0
 for scen_list in SCENARIOS_iter:
 # for scen_list in ['Elektrificatie']:
 
     print(f'Processing {scen_list}')
-    i+=1
+i+=1
 
-    result = push_aggregated_by_scenario_year(
-        plants_workbook_dir="/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm/input/Sprint 2 CTM upload",
-        # plants_workbook_dir="/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm/input/test_input2",
-        mapping_df= mapping_df,
-        emission_cols=EMISSION_COLS_ORDER,
-        energy_cols=UTILITY_COLS_ORDER,
-        transformation_overrides=TRANSFORMATION_OVERRIDES,
-        cluster_sector_file="/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm/input/ctm format curves_2026_05_08.xlsx",
-        cluster_sector_curves_sheet_name='resultaat',
-        cluster_sector_production_sheet_name='wkk rest',
-        # reuse_sessions=sessions,
-        output_log_file=f'/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/test_log_half{i}.txt',
-        selected_scenarios=scen_list,
-        # selected_years=['2040'],
-        session_path='/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/sessions/05_08'
-    )
+result = push_aggregated_by_scenario_year(
+    plants_workbook_dir="/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm_sprint_3/Sprint 3 CTM upload_rest",
+    # plants_workbook_dir="/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm/input/test_input2",
+    mapping_df= mapping_df,
+    emission_cols=EMISSION_COLS_ORDER,
+    energy_cols=UTILITY_COLS_ORDER,
+    transformation_overrides=TRANSFORMATION_OVERRIDES,
+    cluster_sector_file="/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm_sprint_3/ctm format curves.xlsx",
+    cluster_sector_curves_sheet_name='resultaat',
+    cluster_sector_production_sheet_name='wkk rest',
+    reuse_sessions=sessions,
+    output_log_file=f'/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/test_log_half{i}.txt',
+    # selected_scenarios=scen_list,
+    # selected_years=['2040'],
+    session_path='/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/sessions/07_08_r2'
+)
 
-    files = write_push_logs(result, "/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/")
-    print(f"Logs saved to: {files['folder']}")
-    print(f"  - {files['logs_file']}")
-    print(f"  - {files['sessions_file']}")
-    print(f"  - {files['errors_file']}")
-    print(f"  - {files['summary_file']}")
+files = write_push_logs(result, "/home/307920@ontw.alfa.local/projects/epn-ma-master/src/CONNECT_CTM/logs/")
+print(f"Logs saved to: {files['folder']}")
+print(f"  - {files['logs_file']}")
+print(f"  - {files['sessions_file']}")
+print(f"  - {files['errors_file']}")
+print(f"  - {files['summary_file']}")
 
-    # Production inputs automatically included if available
-    print('x')
+# Production inputs automatically included if available
+print('x')
 
 
 # maps = read_and_transform_mapping("/home/307920@ontw.alfa.local/projects/epn-ma-master/data/ctm/input/CTM-DSH site mapping.xlsx", 

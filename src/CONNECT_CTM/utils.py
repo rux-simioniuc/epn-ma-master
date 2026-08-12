@@ -307,12 +307,18 @@ def get_final_cluster_sector_curves(
     return reshaped
 
 
-def push_ctm_scenario_to_etm(ctm_session:str, etm_session:str, etm_token:str):
+def push_ctm_scenario_to_etm(ctm_session:str, etm_session:str, etm_token:str, log_container=None):
+    # Instead of print() or appending to logs list:
+    def log_message(msg):
+        if log_container:
+            log_container.write(msg)
+
     try:
         ctm = CTMClient(use_beta=True)
         ctm.load_session(session_id=ctm_session)
-    except:
+    except Exception as e:
         print('Err loading the CTM session')
+        log_message(f"[ERR] Loading CTM session: {e}")
 
     # Try coupling immediately (empty session)
     try:
@@ -321,8 +327,10 @@ def push_ctm_scenario_to_etm(ctm_session:str, etm_session:str, etm_token:str):
             etm_session_id=etm_session
         )
         print('Pushed CTM session to ETM')
+        log_message(f'[SUCCESS] Pushed CTM {ctm_session} to ETM {etm_session}.')
         return etm_result
     except Exception as e: 
+        log_message(f"[ERR] Pushing to ETM: {e}")
         print(f'Err pushing to ETM: {e}')  
 
 
@@ -641,8 +649,8 @@ def read_all_scenario_sheets_from_excels(
  
     if all_scenario_records:
         scenario_data = pl.concat(all_scenario_records, how='vertical_relaxed')
-        print(f"Combined scenario data: {scenario_data.shape}")
-        print(f"Columns: {scenario_data.columns}")
+        # print(f"Combined scenario data: {scenario_data.shape}")
+        # print(f"Columns: {scenario_data.columns}")
     else:
         print("No scenario data found!")
         scenario_data = pl.DataFrame()
