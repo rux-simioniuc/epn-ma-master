@@ -221,7 +221,6 @@ def load_all_plants_scenario_data(
     
     logs.append(f"Grouped into {len(scenario_year_groups)} scenario-year combos (all flow_types per session)")
     print('read and loaded all plant excels')
-    # print(all_scenario_data)
     return all_scenario_data, scenario_year_groups, logs, errors
 
 
@@ -700,7 +699,9 @@ def push_aggregated_by_scenario_year(
     selected_scenarios: list[str] = ALL_SCENARIOS,
     selected_years: list[str] = SCENARIO_YEARS,
     session_path: str = '',
-    log_container = None        # to paste logs in real time
+    extra_inputs: Dict[str, str] = {},
+    log_container = None,        # to paste logs in real time
+    only_load_scenario_data = False
 ) -> dict:
     """
     Main workflow: Load plants, group by scenario-year, build inputs, push to CTM.
@@ -751,6 +752,11 @@ def push_aggregated_by_scenario_year(
         energy_cols=energy_cols,
         reference_year=reference_year,
     )
+
+    if only_load_scenario_data:
+        print('miau')
+        return {'data':all_scenario_data}
+
     all_logs.extend(step_logs)
     all_errors.extend(step_errors)
     
@@ -904,7 +910,10 @@ def push_aggregated_by_scenario_year(
 
 
             ### Add hardcoded overrides
-            all_inputs.update(OVERRIDES)
+            # all_inputs.update(OVERRIDES)
+
+            if len(extra_inputs) > 0 :
+                all_inputs.update(extra_inputs)
             
             # Push to CTM
             if all_inputs and len(all_inputs) > 1:
@@ -954,6 +963,9 @@ def push_aggregated_by_scenario_year(
     return {
         "logs": all_logs,
         "sessions": sessions_created,
+        "scenario_data": all_scenario_data,
+        "curves_data": cluster_sector_df_long_init,
+        "sector_cluster_prod_data": sector_cluster_prod_df,
         "total_plants": len(all_scenario_data),
         "total_scenario_years": len(scenario_year_groups),
         "errors": all_errors,

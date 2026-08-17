@@ -170,7 +170,7 @@ def extract_scenario_years(streamlit_file) -> tuple[list[str], list[str]]:
     """
     # Save to temp
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-        tmp.write(streamlit_file.read())
+        tmp.write(streamlit_file.getvalue())
         tmp.flush()
         tmp_path = tmp.name
     
@@ -218,3 +218,43 @@ def extract_scenario_years(streamlit_file) -> tuple[list[str], list[str]]:
     
     finally:
         Path(tmp_path).unlink()
+
+
+def parse_custom_inputs_string(input_string: str) -> dict:
+    """
+    Parse string like:
+    {
+    shell_pernis&&transformation: 0,
+    bp&&transformation: 0,
+    }
+    
+    To dict: {'shell_pernis&&transformation': 0, 'bp&&transformation': 0, ...}
+    """
+    
+    # Remove outer braces and whitespace
+    clean = input_string.strip().strip('{}').strip()
+    
+    # Split by commas and parse each line
+    result = {}
+    for line in clean.split(','):
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Split by colon to separate key and value
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip()
+            value = value.strip()
+            result[key] = value
+            
+            # # Convert value to int/float if possible
+            # try:
+            #     result[key] = int(value)
+            # except ValueError:
+            #     try:
+            #         result[key] = float(value)
+            #     except ValueError:
+            #         result[key] = value  # Keep as string
+    
+    return result

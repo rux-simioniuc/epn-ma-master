@@ -28,6 +28,14 @@ SECTORS = [
     'other'
 ]
 
+EXTRA_SECTORS = [
+    'refineries',
+    'steel',
+    'fertilizers',
+    'steam cracking'
+]
+
+ALL_SECTORS = SECTORS + EXTRA_SECTORS
 
 BOTTOM_UP_CATEGORIES = {
     # Refineries
@@ -106,6 +114,17 @@ OVERRIDES = {
     'other_chemicals&&chemelot&&cluster_site_other_chemicals_chemelot&&transformation': 0
 }
 
+
+TRANSFORMATION_OVERRIDES_FULL = {
+    "air_liquide&&transformation": "1",
+    "air_liquide_boz&&transformation": "1",
+    "air_products&&transformation": "1",
+    "air_products_merseyweg&&transformation": "1",
+    "sabic&&transformation": "1",
+}
+
+
+ALL_OVERRIDES = TRANSFORMATION_OVERRIDES_FULL | OVERRIDES
 
 
 ALL_SCENARIOS = [

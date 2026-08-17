@@ -14,6 +14,9 @@ import ast
 import copy
 import gc
 import psutil
+import plotly.express as px
+import plotly.graph_objects as go
+
 
 import sys
 from pathlib import Path
@@ -22,25 +25,21 @@ from pathlib import Path
 src_path = Path(__file__).parent
 sys.path.insert(0, str(src_path))
 
-
-# from DSH2CTM.main import read_csv
 from DSH2CTM.streamlit_utils import *
 from CONNECT_CTM.utils import push_ctm_scenario_to_etm, get_master_emissions_utilities, get_master_projects, read_and_transform_mapping, normalize_sector_cluster_mapping
 from CONNECT_CTM.push_to_ctm_modules import push_aggregated_by_scenario_year
 from CONNECT_CTM.constants import EMISSION_COLS_ORDER, UTILITY_COLS_ORDER
-from CONNECT_CTM.ctm_constants import TRANSFORMATION_OVERRIDES 
+from CONNECT_CTM.ctm_constants import ALL_OVERRIDES 
 
 # Periodically clear memory
 def clear_session_cache():
     """Clear unnecessary session state."""
-    keys_to_clear = [
-        'generated_files',  # Remove if not needed
-        'excel_data',       # Remove after processing
-        'dsh_logs',         # Keep only last N logs
-    ]
-    for key in keys_to_clear:
-        if key in st.session_state:
-            del st.session_state[key]
+    for i in st.session_state:
+        del st.session_state[i]
+
+    # for key in keys_to_clear:
+    #     if key in st.session_state:
+    #         del st.session_state[key]
     gc.collect()
 
 def show_memory_usage():
@@ -97,7 +96,7 @@ with st.sidebar.expander("ETM Settings", expanded=False):
     
 
 # ── Main tabs ──────────────────────────────────────────────────────────
-tab1, tab2 = st.tabs(["DSH Input & Output", "CTM/ETM Workflow"])
+tab1, tab2, tab3 = st.tabs(["DSH Input & Output", "CTM/ETM Workflow", "Visualization"])
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -528,8 +527,8 @@ with tab2:
         st.session_state.production_curves_df = None
     if 'ctm_sessions' not in st.session_state:
         st.session_state.ctm_sessions = None
-    # if 'plant_files' not in st.session_state:
-    #     st.session_state.plant_files = None
+    if 'all_data' not in st.session_state:
+        st.session_state.all_data = None
 
     len_plants = 0
 
@@ -554,6 +553,16 @@ with tab2:
             if plant_files:
                 st.success(f"✓ {len(plant_files)} files uploaded")  
                 len_plants = len(plant_files)
+                if st.button('Aggregate the data', use_container_width=True, key='get_only_data'):
+
+                        res = push_aggregated_by_scenario_year(
+                            plants_workbook_dir=plant_files.copy(),
+                            mapping_df=st.session_state.mapping,
+                            only_load_scenario_data= True,
+                            reference_year='0',
+                        )
+                        st.session_state.all_data = res['data']
+                        # st.write(all_data)
                 # st.session_state.plant_files = plant_files                    
         with col2:
             st.markdown("### Mapping File")
@@ -735,6 +744,22 @@ with tab2:
         else:
             disabled_button = False
 
+        extra_inputs_input = st.text_area(
+            label='Enter additional inputs',
+            height=200,
+            key='extra_inputs',
+            help='{api_name1: value1, api_name2: value2}',
+            value="{\n" + "\n".join(
+                f"    {k}: {v}," for k, v in ALL_OVERRIDES.items()
+            ) + "\n}"
+        )
+
+        if extra_inputs_input:
+            try:
+                extra_inputs = parse_custom_inputs_string(extra_inputs_input)
+            except Exception as e:
+                st.error(f"[ERR] Error parsing the extra inputs: {e}")
+
 
         if st.button("Push to CTM", type="primary", disabled=disabled_button):
             log_container = st.container(border=True, height=300)
@@ -747,7 +772,7 @@ with tab2:
                         mapping_df=st.session_state.mapping,
                         emission_cols=EMISSION_COLS_ORDER,
                         energy_cols=UTILITY_COLS_ORDER,
-                        transformation_overrides=TRANSFORMATION_OVERRIDES,
+                        # transformation_overrides=TRANSFORMATION_OVERRIDES,
                         cluster_sector_file=st.session_state.main_curves_df,
                         cluster_sector_production=st.session_state.production_curves_df,
                         reuse_sessions=st.session_state.ctm_sessions,
@@ -758,7 +783,6 @@ with tab2:
                         log_container=log_container
                     )
 
-                    # print(st.session_state.result)
             except Exception as e:
                 st.error(f'Error: {e}')
 
@@ -990,7 +1014,163 @@ with tab2:
             st.success("Cache cleared")
             # gc.collect()
 
-#''' Extra sidetab '''
+
+with tab3:
+    scenario_data = {}
+    cluster_data = {}
+    sector_data = {}
+
+    for i,v in st.session_state.all_data.items():
+        scenario_data[v['name']] = v['df']
+        # print(scenario_data[v['name']])
+        # print('-------')
+    with st.expander('Individual plant viz'):
+
+        current_plant = st.selectbox(label='Select individual plant', options=scenario_data.keys())
+        current_column = st.selectbox(label='Select emission / utility', options=EMISSION_COLS_ORDER + UTILITY_COLS_ORDER)
+        fig = px.line(scenario_data[current_plant], x='Year', y=current_column, color='Scenario', line_dash='Flow type')
+        st.plotly_chart(fig)
+
+
+    from CONNECT_CTM.ctm_constants import CLUSTERS, ALL_SECTORS
+    from collections import defaultdict
+
+
+    sector_dfs = defaultdict(list)
+    cluster_dfs = defaultdict(list)
+
+    for plant in st.session_state.all_data.values():
+        sector = plant["mapping_row"]["Sector"]
+        cluster = plant["mapping_row"]["Cluster"]
+        
+        sector_dfs[sector].append(plant["df"])
+        cluster_dfs[cluster].append(plant["df"])
+
+    # add all_chemicals to sectors
+    sector_dfs['all_chemicals'] = sector_dfs['organic_base_chemicals'] + sector_dfs['other_chemicals'] + sector_dfs['inorganic_base_chemicals'] 
+
+    # casting all numeric/null columns to float; otherwise concat yields errs
+
+    sector_df = {
+        sector: pl.concat(
+            [
+                df.with_columns(
+                    pl.col(pl.Int64, pl.Float64, pl.Null).cast(pl.Float64)
+                )
+                for df in dfs
+            ],
+            how="vertical"
+        )
+        for sector, dfs in sector_dfs.items()
+    }
+
+    
+    cluster_df = {
+        sector: pl.concat(
+            [
+                df.with_columns(
+                    pl.col(pl.Int64, pl.Float64, pl.Null).cast(pl.Float64)
+                )
+                for df in dfs
+            ],
+            how="vertical"
+        )
+        for sector, dfs in cluster_dfs.items()
+    }
+
+    group_by_cols = ["Scenario", "Year", "Flow type"]
+
+
+    with st.expander('Cluster-level aggregation'):
+
+        cluster_df = {
+                cluster: df.group_by(group_by_cols).agg(
+                    pl.col([
+                        col for col in df.columns
+                        if col not in group_by_cols and df[col].dtype.is_numeric()
+                    ]).sum()
+                ).sort('Year', 'Flow type')
+                for cluster, df in cluster_df.items()
+            }
+        
+        current_cluster = st.selectbox(label='Select cluster', options = sorted(cluster_dfs.keys()))
+        current_column_cluster = st.selectbox(label='Select emission / utility', options=EMISSION_COLS_ORDER + UTILITY_COLS_ORDER, key='column_cluster')
+
+
+        fig2 = px.line(
+            cluster_df[current_cluster],
+            x="Year",
+            y=current_column_cluster,
+            color="Scenario",
+            line_dash="Flow type"
+        )
+
+        st.plotly_chart(fig2)
+
+
+        current_scenario = st.selectbox(label='Select scenario', options = sorted(cluster_df[current_cluster].select(pl.col('Scenario')).unique().to_series().to_list()))
+
+        plot_df = cluster_df[current_cluster].filter(
+            pl.col("Scenario") == current_scenario
+            ).with_columns(
+                pl.when(pl.col("Flow type") == "production")
+                .then(-pl.col(EMISSION_COLS_ORDER+UTILITY_COLS_ORDER))
+                .otherwise(pl.col(EMISSION_COLS_ORDER+UTILITY_COLS_ORDER))
+            )
+
+        fig = px.bar(plot_df, x="Year", y=EMISSION_COLS_ORDER, title=f"Emissions for cluster {current_cluster}, scenario {current_scenario}", pattern_shape='Flow type')
+        st.plotly_chart(fig)
+
+        fig = px.bar(plot_df, x="Year", y=UTILITY_COLS_ORDER, title=f"Utilities for cluster {current_cluster}, scenario {current_scenario}", pattern_shape='Flow type')
+        st.plotly_chart(fig)
+
+
+    with st.expander('Sector-level aggregation'):
+        sector_df = {
+            sector: df.group_by(group_by_cols).agg(
+                pl.col([
+                    col for col in df.columns
+                    if col not in group_by_cols and df[col].dtype.is_numeric()
+                ]).sum()
+            ).sort(['Year', 'Flow type'])
+            for sector, df in sector_df.items()
+        }
+
+        
+        current_sector = st.selectbox(label='Select sector', options = sorted(sector_dfs.keys()))
+
+        current_column_sector = st.selectbox(label='Select emission / utility', options=EMISSION_COLS_ORDER + UTILITY_COLS_ORDER, key='column_sector')
+
+        
+        fig3 = px.line(
+            sector_df[current_sector],
+            x="Year",
+            y=current_column_sector,
+            color="Scenario",
+            line_dash="Flow type"
+        )
+
+        st.plotly_chart(fig3)
+
+
+        current_scenario = st.selectbox(label='Select scenario', options = sorted(cluster_df[current_cluster].select(pl.col('Scenario')).unique().to_series().to_list()), key='scenario_sector')
+        
+        plot_df = sector_df[current_sector].filter(
+            pl.col("Scenario") == current_scenario
+            ).with_columns(
+                pl.when(pl.col("Flow type") == "production")
+                .then(-pl.col(EMISSION_COLS_ORDER+UTILITY_COLS_ORDER))
+                .otherwise(pl.col(EMISSION_COLS_ORDER+UTILITY_COLS_ORDER))
+            )
+
+        fig = px.bar(plot_df, x="Year", y=EMISSION_COLS_ORDER, title=f"Emissions for cluster {current_sector}, scenario {current_scenario}", pattern_shape='Flow type')
+        st.plotly_chart(fig)
+
+        fig = px.bar(plot_df, x="Year", y=UTILITY_COLS_ORDER, title=f"Utilities for cluster {current_sector}, scenario {current_scenario}", pattern_shape='Flow type')
+        st.plotly_chart(fig)
+    
+
+
 
 st.sidebar.markdown("### Extra options")
 
@@ -1003,7 +1183,7 @@ disable_master_projects = not all([
     ]) or (st.session_state.mapping is None or st.session_state.mapping.is_empty())
 
 with st.sidebar.expander("Download helper files", expanded=False):
-    if st.button('Generate Master util/emission File', use_container_width=True, disabled=disable_master):
+    if st.button('Generate Master Energy Balance File', use_container_width=True, disabled=disable_master):
         try:
             master = None
             log_area = st.empty()
@@ -1053,9 +1233,9 @@ with st.sidebar.expander("Download helper files", expanded=False):
                 
         except Exception as e:
             st.error(f'[ERROR]: {e}')
-
+    
     if disable_master:
-            st.warning('plant files and mapping', title='Upload files')  
+            st.warning('[Plant Workbooks](#plant-workbooks) and [mapping](#mapping-file) in CTM/ETM workflow tab', title='Upload files')  
     if st.button('Generate Master Projects File', use_container_width=True, disabled=disable_master_projects):
         st.write('Yey')
         try:
@@ -1084,7 +1264,7 @@ with st.sidebar.expander("Download helper files", expanded=False):
             st.error(f'[ERROR]: {e}')
         
     if disable_master_projects:
-        st.warning('mapping, DSH files (reference + projects)', title='Upload files')  
+        st.warning('[DSH files - reference + projects](#upload-dsh-files) in DSH Input tab and [mapping](#mapping-file) in CTM/ETM workflow tab', title='Upload files')  
 
 
 # ── Footer ─────────────────────────────────────────────────────────────
