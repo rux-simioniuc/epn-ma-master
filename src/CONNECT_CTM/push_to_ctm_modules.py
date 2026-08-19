@@ -172,7 +172,7 @@ def load_all_plants_scenario_data(
 
                 # Try to load production table (optional, may be empty)
                 try:
-                    production_df = read_production_table(workbook_path=str(wb_path))
+                    production_df, = read_production_table(workbook_path=str(wb_path))
                     if not production_df.is_empty():
                         all_scenario_data[plant_id]["production_df"] = production_df
                         # logs.append(f"  └- Production table: {len(production_df)} rows")
@@ -183,7 +183,7 @@ def load_all_plants_scenario_data(
                 # TODO this is TEMPORARY
                 if plant_name == 'Air Liquide Pernis':
                     try:
-                        flexibility_df = read_production_table(workbook_path=str(wb_path), sheet_name='Flexibility')
+                        flexibility_df,  = read_production_table(workbook_path=str(wb_path), sheet_name='Flexibility')
                         if not flexibility_df.is_empty():
                             # filter out comments after the table
                             flexibility_df = flexibility_df.filter(pl.col('Year').is_not_null())

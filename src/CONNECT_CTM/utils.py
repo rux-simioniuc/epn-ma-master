@@ -2,10 +2,12 @@ import polars as pl
 from pathlib import Path
 from openpyxl import load_workbook
 from typing import Dict
+import xlsxwriter
+import io
 import tempfile
 from .constants import SCENARIO_YEARS, EMISSION_COLS_ORDER, UTILITY_COLS_ORDER
 from .ctm_client import CTMClient
-from .read_DSH_files import read_all_scenario_sheets
+from .read_DSH_files import read_all_scenario_sheets, read_production_table
 # read and transform mapping excel
 
 
@@ -693,4 +695,112 @@ def get_master_emissions_utilities(
     df_enriched = df_enriched.select(base_cols + metric_cols).sort(['Plant name', 'Year', 'Flow type'])
 
     return df_enriched
+
+
+def get_units_per_plant(plant_file_path, plant_name):
+
+    prod, prod_init = read_production_table(plant_file_path)
+    prod = prod.select(['Scenario', 'Year', 'Units'])
+    prod_units = prod.with_columns(pl.col('Units').str.split(';').cast(pl.List(pl.String)))
+
+    prod_op_power = prod_init.select(['Name', 'Operating power (MW)']).filter(~pl.all_horizontal(pl.all().is_null()))
+
+    result = (
+        prod_units
+        .explode("Units")
+        .rename({"Units": "Unit name"})
+        .join(
+            prod_op_power,
+            left_on="Unit name",
+            right_on="Name",
+            how="left"
+        )
+        .filter(
+            pl.col("Unit name").is_not_null() &
+            pl.col("Operating power (MW)").is_not_null()
+        )
+        .with_columns(
+            pl.lit(plant_name).alias("Plant name"),
+            # build the pivot column name yourself
+            (pl.col("Scenario") + "_" + pl.col("Year").cast(pl.String)).alias("Scenario_Year"),
+        )
+        .select([
+            "Plant name",
+            "Unit name",
+            "Scenario_Year",
+            "Operating power (MW)",
+        ])
+    )
+
+    wide = (
+        result
+        .pivot(
+            on="Scenario_Year",              # single column now
+            index=["Plant name", "Unit name"],
+            values="Operating power (MW)",
+            aggregate_function="first",
+        )
+    )
+
+    return wide
+
+
+def create_units_excel(df: pl.DataFrame) -> bytes:
+    buffer = io.BytesIO()
+
+    with xlsxwriter.Workbook(buffer) as workbook:
+        worksheet = workbook.add_worksheet("Units")
+
+        header_format = workbook.add_format({
+            "bold": True,
+            "align": "center",
+            "valign": "vcenter",
+            "border": 1,
+        })
+
+
+        subheader_format = workbook.add_format({
+            "bold": True,
+            "align": "center",
+            "border": 1,
+        })
+
+        # Plant name + Unit name
+        worksheet.merge_range(0, 0, 1, 0, "Plant name", header_format)
+        worksheet.merge_range(0, 1, 1, 1, "Unit name", header_format)
+
+        # Get scenario/year combinations from wide column names
+        columns = df.columns[2:]
+
+        scenarios = {}
+        for column in columns:
+            scenario, year = column.split("_", 1)
+            scenarios.setdefault(scenario, []).append(year)
+
+        col = 2
+        for scenario, years in scenarios.items():
+            start_col = col
+            end_col = col + len(years) - 1
+
+            worksheet.merge_range(
+                0, start_col,
+                0, end_col,
+                scenario,
+                header_format,
+            )
+
+            for year in years:
+                worksheet.write(1, col, year, subheader_format)
+                col += 1
+        # Write data starting on row 3
+        df.write_excel(
+            workbook=workbook,
+            worksheet=worksheet,
+            position=(2, 0),
+            include_header=False,
+        )
+
+    buffer.seek(0)
+    return buffer.getvalue()
+
 

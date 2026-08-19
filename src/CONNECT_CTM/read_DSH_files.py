@@ -1,6 +1,7 @@
 import polars as pl
 from openpyxl import load_workbook
 from pathlib import Path
+from typing import Tuple, IO
 
 def normalize_column_name(name: str) -> str:
     """
@@ -289,14 +290,14 @@ def save_scenario_values(
  
  
 def read_production_table(
-    workbook_path: str,
+    workbook_path: str | bytes | IO, # can be either string either UploadedFile from streamlit
     sheet_name: str = "Production",
-) -> pl.DataFrame:
+) -> Tuple[pl.DataFrame, pl.DataFrame]:
     # Read entire sheet without assuming a header
     raw = pl.read_excel(
         workbook_path,
         sheet_name=sheet_name,
-        has_header=False,
+        has_header=True,
     )
  
     # edge case - no capacity / flh / efficiency table
@@ -308,8 +309,8 @@ def read_production_table(
     header_row = (
         raw.with_row_index()
         .filter(
-            (pl.col("column_1") == "Scenario")
-            & (pl.col("column_2") == "Year")
+            (pl.col("Name") == "Scenario")
+            & (pl.col("Year") == "Year")
         )
         .select("index")
         .item()
@@ -325,6 +326,8 @@ def read_production_table(
     )
  
     headers = [str(v) for v in header_values[:n_cols]]
+
+    init_prod = raw.slice(0, header_row)
  
     # Data below header
     data = raw.slice(header_row + 1)
@@ -351,7 +354,7 @@ def read_production_table(
     if empty_rows:
         data = data.slice(0, empty_rows[0])
  
-    return data
+    return (data, init_prod)
  
  
 def save_production_values(
@@ -360,7 +363,7 @@ def save_production_values(
     output_dir: str,
 ) -> str:
  
-    df = read_production_table(
+    df,  = read_production_table(
         workbook_path,
         sheet_name="Production",
     )
