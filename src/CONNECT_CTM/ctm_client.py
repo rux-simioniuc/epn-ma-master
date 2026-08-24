@@ -14,7 +14,7 @@ HEADERS = {
 # ── Core API call ──────────────────────────────────────────────────────────
 
 class CTMClient:
-    def __init__(self, use_beta: bool = False):
+    def __init__(self, use_beta: bool = True):
         self.url            = CTM_BETA if use_beta else CTM_LIVE
         self.session_id     = None
         self.ms_graph_session = None
@@ -144,24 +144,61 @@ class CTMClient:
 
     def create_clean_sheet_session(self) -> str:
         """
-        Create a session from base and immediately apply clean sheet settings.
-        This disables all CTM built-in calculations so only explicitly set data
+        Create a session from base and immediately apply clean sheet settings,
+        disabling all CTM built-in calculations so only explicitly set data
         is sent to the ETM.
         """
-        # Step 1: create session from base
-        data = self._call({"ScenarioID": "SC-38de635397b1e85f", "outputs": []})
+        data = self._call({"ScenarioID": "base", "outputs": []})
         self.session_id = data["SessionID"]
         print(f"Session created: {self.session_id}")
-
-        # Step 2: apply clean sheet settings (disable all built-in calculations)
+ 
         self.set_inputs({
             "other_settings_other_industry_disable_inputs_input": "1",
-            "other_settings_ctm_bottom_up_sites_input":           "1",
+            "other_settings_ctm_bottom_up_sites_input": "1",
             "other_settings_disable_waste_incineration_to_etm_input": "1",
             "other_settings_fertilizers_to_chemicals_etm_input": "1",
         })
         print("Clean sheet applied.")
         return self.session_id
+
+
+    def clear_session_inputs(self) -> dict:
+        """
+        Clears the inputs from a given sessions -> revert to clean sheet
+        """
+
+        # create a new clean sessions
+
+        aux_client = CTMClient(use_beta=True)
+        aux_session = aux_client.create_clean_sheet_session()
+
+        custom_clean = aux_client._call({
+            "SessionID": aux_client.session_id,
+            "outputs": [],
+            "special": ["requestCustomInputs"],
+        }).get("output_values", {})
+
+        custom_actual = self._call({
+            "SessionID": self.session_id,
+            "outputs": [],
+            "special": ["requestCustomInputs"],
+        }).get("output_values", {})
+
+        reset ={}
+        for k, v in custom_actual.items():
+            if v!= '':  # skip inputs which are already empty
+                if k not in custom_clean:
+                    reset[k] = ''
+                else:
+                    reset[k] = custom_clean[k]
+
+
+        rets = self.set_inputs(reset)
+
+        # delete aux session
+        aux_client.delete_session()
+        print(f'Reset session {self.session_id}')
+    
 
     def delete_session(self):
         """Permanently delete the current session."""

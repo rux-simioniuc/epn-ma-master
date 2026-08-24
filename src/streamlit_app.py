@@ -28,7 +28,7 @@ from CONNECT_CTM.utils import push_ctm_scenario_to_etm, get_master_emissions_uti
 from CONNECT_CTM.push_to_ctm_modules import push_aggregated_by_scenario_year
 from CONNECT_CTM.constants import EMISSION_COLS_ORDER, UTILITY_COLS_ORDER
 from CONNECT_CTM.ctm_constants import ALL_OVERRIDES 
-from CONNECT_CTM.utils import get_units_per_plant, create_units_excel
+from CONNECT_CTM.utils import get_units_per_plant, create_units_excel, clear_session
 
 # Periodically clear memory
 def clear_session_cache():
@@ -952,6 +952,25 @@ with tab2:
 
             else:
                 st.error("Missing credentials!")
+
+    with st.expander("Extra option: Clear CTM sessions.", expanded=False):
+        st.write('IMPORTANT: not 100% tested. Should work, but the best option is to create new sessions.')
+        scenarios_to_clear = st.text_area(label="Paste the CTM session IDs. Paste the IDs separated by a comma. Can be on new lines or on the same line.")
+
+        scenarios_clear_list = scenarios_to_clear.strip().replace('\n', '').replace(' ', '').replace("'", '').replace('"', '').split(',')
+        if '' in scenarios_clear_list:
+            scenarios_clear_list.remove('')
+
+        if st.button('Clear sessions'):
+            try:
+                for s in scenarios_clear_list:
+                    clear_session(session_id=s)
+                    st.write(f'Done with {s}')
+                st.success('All done')
+            except Exception as e:
+                st.error(f"[ERROR]: {e}")
+            st.write(scenarios_clear_list)
+            print(scenarios_clear_list)
 
     # ── Summary ────────────────────────────────────────────────────────
     st.divider()

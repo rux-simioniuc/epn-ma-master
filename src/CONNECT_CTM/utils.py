@@ -804,3 +804,9 @@ def create_units_excel(df: pl.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
+
+def clear_session(session_id):
+    aux = CTMClient(use_beta=True)
+    aux.load_session(session_id)
+    aux.clear_session_inputs()
+    
