@@ -15,6 +15,7 @@ import copy
 import gc
 import psutil
 import plotly.express as px
+from collections import defaultdict
 
 import sys
 from pathlib import Path
@@ -24,11 +25,19 @@ src_path = Path(__file__).parent
 sys.path.insert(0, str(src_path))
 
 from DSH2CTM.streamlit_utils import *
-from CONNECT_CTM.utils import push_ctm_scenario_to_etm, get_master_emissions_utilities, get_master_projects, read_and_transform_mapping, normalize_sector_cluster_mapping
-from CONNECT_CTM.push_to_ctm_modules import push_aggregated_by_scenario_year
+from CONNECT_CTM.string_utils import normalize_sector_cluster_mapping
+from CONNECT_CTM.connect_to_etm import couple_all_sessions_to_etm
+from CONNECT_CTM.utils import (get_master_emissions_utilities, 
+                               get_master_projects, 
+                               read_and_transform_mapping,
+                               get_units_per_plant, 
+                               create_units_excel, 
+                               clear_session
+                               )
 from CONNECT_CTM.constants import EMISSION_COLS_ORDER, UTILITY_COLS_ORDER
-from CONNECT_CTM.ctm_constants import ALL_OVERRIDES 
-from CONNECT_CTM.utils import get_units_per_plant, create_units_excel, clear_session
+from CONNECT_CTM.ctm_push import push_aggregated_by_scenario_year
+from CONNECT_CTM.models import DEFAULT_TRANSFORMATION_OVERRIDES
+
 
 # Periodically clear memory
 def clear_session_cache():
@@ -83,11 +92,9 @@ st.sidebar.markdown("### Credentials (Cached)")
 with st.sidebar.expander("ETM Settings", expanded=False):
     etm_token = st.text_input(
         "ETM Authorization Token",
-        # value=st.session_state.etm_token,
-        value = 'etm_eyJraWQiOiJkODI5ZTk3YTU4ZDhhOTQyYjg3NGI5ZjNiZWI3ZDJlNGY0MTA5ZjIzNWE0Y2NhMDkzYmU5MzFiMzY1NTlkNGI2IiwiYWxnIjoiUlMyNTYifQ.eyJpc3MiOiJodHRwczovL215LmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20iLCJpYXQiOjE3ODUzMTI5NDUsImF1ZCI6Imh0dHBzOi8vZW5naW5lLmVuZXJneXRyYW5zaXRpb25tb2RlbC5jb20gaHR0cHM6Ly8yMDI1LTAxLmVuZ2luZS5lbmVyZ3l0cmFuc2l0aW9ubW9kZWwuY29tIiwic2NvcGVzIjoib3BlbmlkIHB1YmxpYyBzY2VuYXJpb3M6cmVhZCBzY2VuYXJpb3M6d3JpdGUiLCJqdGkiOiJjMjZkZWI5Zi05YTM3LTQ3OWQtYjUxYy0zZDM3M2Q3YjE4NmUiLCJzdWIiOjE2NzcyLCJ1c2VyIjp7ImlkIjoxNjc3MiwiYWRtaW4iOmZhbHNlLCJlbWFpbCI6InJ1eGFuZHJhLnNpbWlvbml1Y0B0ZW5uZXQuZXUiLCJuYW1lIjoiUnV4In0sImV4cCI6MTc4NzkwNDk0NX0.tpO0EXw7tFiRrySA3V9HPTw6EDEd2g7RCydM6VOTg2E3LLE3jq9dxRUziz6nZnFAQS_5DJniSAoABbePtDkY9qKOd-vmUTJEyM63COxUxlaJ5Q8NmISJNXVYnj-vsqcjXVO64CzByCx6WVUE9VJh2Gp228hehjjE_HzpLXvonFGQY3pNV92RnFw4rhJAwCE2uWs8_sn1r2Fs9lrAQXNeWKbTUjArmOTMYM-F1ZoqDjnCsdIeEhoKRMI1aNZqauDjH6eSSjy4ltK7dRivwRew0OO8bzfqd7QW6yyZjbhBEH6WzLICwZVQO1zOoH-sxYgmwwenFOYo218fifLZWH8UHg',
-        # type="password",
+        value=st.session_state.etm_token,
+        type="password",
         key="etm_token_input",
-
     )
     if etm_token:
         st.session_state.etm_token = etm_token
@@ -334,7 +341,7 @@ with tab1:
                 if len(scenario_names_list) != scenario_amount:
                     raise Exception(f"Amount of names ({len(scenario_names_list)}) inconsistent with the number of scenarios ({scenario_amount}).")
             except Exception as e:
-                st.error(f'[ERR] Error processing scenario names: {e}')
+                st.error(f'[ERROR] Error processing scenario names: {e}')
 
             
         with col2:
@@ -363,7 +370,7 @@ with tab1:
                 ]
                 test_int_list = [int(x) for x in scenario_years_list]
             except Exception as e:
-                st.error(f'[ERR] parsing scenario years: {e}')
+                st.error(f'[ERROR] parsing scenario years: {e}')
 
         st.divider()
 
@@ -551,7 +558,10 @@ with tab2:
             if plant_files:
                 st.success(f"✓ {len(plant_files)} files uploaded")  
                 len_plants = len(plant_files)
-                if st.button('Aggregate the data', use_container_width=True, key='get_only_data'):
+                if st.button('Aggregate the data', 
+                             use_container_width=True, 
+                             key='get_only_data', 
+                             disabled=(st.session_state.mapping is None or st.session_state.mapping.is_empty())):
 
                         res = push_aggregated_by_scenario_year(
                             plants_workbook_dir=plant_files.copy(),
@@ -748,15 +758,16 @@ with tab2:
             key='extra_inputs',
             help='{api_name1: value1, api_name2: value2}',
             value="{\n" + "\n".join(
-                f"    {k}: {v}," for k, v in ALL_OVERRIDES.items()
+                f"    {k}: {v}," for k, v in DEFAULT_TRANSFORMATION_OVERRIDES.items()
             ) + "\n}"
         )
 
+        extra_inputs = {}
         if extra_inputs_input:
             try:
                 extra_inputs = parse_custom_inputs_string(extra_inputs_input)
             except Exception as e:
-                st.error(f"[ERR] Error parsing the extra inputs: {e}")
+                st.error(f"[ERROR] Error parsing the extra inputs: {e}")
 
 
         if st.button("Push to CTM", type="primary", disabled=disabled_button):
@@ -770,19 +781,19 @@ with tab2:
                         mapping_df=st.session_state.mapping,
                         emission_cols=EMISSION_COLS_ORDER,
                         energy_cols=UTILITY_COLS_ORDER,
-                        # transformation_overrides=TRANSFORMATION_OVERRIDES,
+                        extra_inputs=extra_inputs,
                         cluster_sector_file=st.session_state.main_curves_df,
                         cluster_sector_production=st.session_state.production_curves_df,
                         reuse_sessions=st.session_state.ctm_sessions,
                         selected_scenarios=st.session_state.selected_scenarios,
+                        selected_years=st.session_state.selected_years,
                         use_beta=st.session_state.use_beta,
                         reference_year=st.session_state.ref_year,
-                        selected_years=st.session_state.selected_years,
-                        log_container=log_container
+                        log_container=log_container,
                     )
 
             except Exception as e:
-                st.error(f'Error: {e}')
+                st.error(f'[ERROR]: {e}')
 
         # Show logs    
         if st.session_state.result is not None:    
@@ -807,6 +818,22 @@ with tab2:
                 file_name=f"ctm_sessions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json",
             )
+
+            if st.session_state.result.get("all_inputs"):
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                    for (scenario, year), inputs in st.session_state.result["all_inputs"].items():
+                        file_name = f"{scenario}_{year}.json".replace(" ", "_")
+                        zip_file.writestr(file_name, json.dumps(inputs, indent=2))
+
+                zip_buffer.seek(0)
+
+                st.download_button(
+                    label="Download all pushed inputs (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name=f"ctm_inputs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                )
 
         
     # ── Step 4: Push to ETM ────────────────────────────────────────────
@@ -895,60 +922,19 @@ with tab2:
         failed_push = 0
         
         if st.button("Couple to ETM", type="primary"):
-            st.session_state.push_logs = []
             if st.session_state.etm_token and st.session_state.etm_session_json:
 
                 st.markdown("### Logs")
                 log_container = st.container(border=True, height=300)
 
-                for (scenario, year) in st.session_state.ctm_sessions.keys():
-                    ctm_session = st.session_state.ctm_sessions[(scenario, year)]
-
-                    etm_session = st.session_state.etm_session_json[(scenario, year)]
-
-                    msg = f"Pushing {scenario} {year}; CTM {ctm_session} to ETM {etm_session}"
-                    st.session_state.push_logs.append(msg)
-                    log_container.text(msg)
-
-                    # Retry loop
-                    aux_result = None
-                    for attempt in range(max_retries):
-                        try:
-                            aux_result = push_ctm_scenario_to_etm(
-                                ctm_session, 
-                                etm_session, 
-                                st.session_state.etm_token,
-                                log_container=log_container
-                            )
-                            
-                            if aux_result is not None:
-                                log_container.text(f"✓ Success on attempt {attempt + 1}")
-                                # st.session_state.push_logs.append(f"✓ Success")
-                                break  # Exit retry loop on success
-                            else:
-                                if attempt < max_retries - 1:  # Don't log on last attempt
-                                    log_container.text(f"✗ Failed attempt {attempt + 1}, retrying...")
-                                    import time
-                                    time.sleep(1)  # ← Add delay between retries
-                                else:
-                                    log_container.text(f"✗ Failed after {max_retries} attempts")
-                                    st.session_state.push_logs.append(f"✗ Failed after {max_retries} retries")
-                        
-                        except Exception as e:
-                            if attempt < max_retries - 1:
-                                log_container.text(f"[ERROR] Attempt {attempt + 1}: {e}, retrying...")
-                                import time
-                                time.sleep(1)
-                            else:
-                                log_container.text(f"[ERROR] Failed after {max_retries} attempts: {e}")
-                                st.session_state.push_logs.append(f"[ERROR]: {e}")
-                    
-                    if aux_result is None:
-                        log_container.text(f"✗ {scenario}/{year} FAILED")
-                        fail_push += 1
-                    else:
-                        log_container.text(f"✓ {scenario}/{year} SUCCESS")
-                        success_push += 1
+                res_push, logs = couple_all_sessions_to_etm(
+                    ctm_sessions=st.session_state.ctm_sessions, 
+                    etm_sessions=st.session_state.etm_session_json,
+                    etm_token=st.session_state.etm_token,
+                    max_retries=max_retries,
+                    retry_delay_seconds=1.0,
+                    log_container=log_container
+                )
 
             else:
                 st.error("Missing credentials!")
@@ -1040,19 +1026,12 @@ with tab3:
 
         for i,v in st.session_state.all_data.items():
             scenario_data[v['name']] = v['df']
-            # print(scenario_data[v['name']])
-            # print('-------')
         with st.expander('Individual plant viz'):
 
             current_plant = st.selectbox(label='Select individual plant', options=scenario_data.keys())
             current_column = st.selectbox(label='Select emission / utility', options=EMISSION_COLS_ORDER + UTILITY_COLS_ORDER)
             fig = px.line(scenario_data[current_plant], x='Year', y=current_column, color='Scenario', line_dash='Flow type')
             st.plotly_chart(fig)
-
-
-        from CONNECT_CTM.ctm_constants import CLUSTERS, ALL_SECTORS
-        from collections import defaultdict
-
 
         sector_dfs = defaultdict(list)
         cluster_dfs = defaultdict(list)
