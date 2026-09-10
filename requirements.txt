@@ -8,3 +8,5 @@ psutil==7.2.2
 requests==2.34.2
 streamlit==1.59.1
 xlsxwriter==3.2.9
+geopy==2.5.0
+geopandas==1.1.4
