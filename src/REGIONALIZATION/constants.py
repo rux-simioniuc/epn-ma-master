@@ -1,0 +1,17 @@
+
+
+
+
+PATH_MANUAL_FILES = 'src/REGIONALIZATION/ref_data/persistent_manual_input/'
+
+FILE_NAME_PROVIDERS = 'manual_providers.csv'
+PATH_PROVIDERS = PATH_MANUAL_FILES + FILE_NAME_PROVIDERS
+
+
+FILE_NAME_COORDS = 'manual_coords.csv'
+PATH_COORDS = PATH_MANUAL_FILES  + FILE_NAME_COORDS
+
+PATH_PERSISTENTS = {
+    'coordinates': PATH_COORDS,
+    'providers': PATH_PROVIDERS
+}
