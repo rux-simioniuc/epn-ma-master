@@ -44,14 +44,14 @@ from .ctm_keys import (
     build_custom_site_latitude_key, build_custom_site_longitude_key, build_custom_site_data_key,
     get_valid_keys_for_site, get_valid_keys_for_bottom_up_site, get_valid_keys_for_custom_site,
 )
-from .mappers import map_dsh_energy_to_ctm, map_dsh_emission_to_ctm
-from .string_utils import fix_string
-from .curves_utils import get_final_cluster_sector_curves
+from .utils.mappers import map_dsh_energy_to_ctm, map_dsh_emission_to_ctm
+from .utils.string_utils import fix_string
+from .utils.curves_utils import get_final_cluster_sector_curves
 from .read_DSH_files import (
     read_all_scenario_sheets, read_production_table,
     read_production_table_curves, read_plant_details,
 )
-from .constants import SCENARIO_YEARS, REFERENCE_YEAR, EMISSION_COLS_ORDER, UTILITY_COLS_ORDER, ALL_SCENARIOS
+from .utils.constants import SCENARIO_YEARS, REFERENCE_YEAR, EMISSION_COLS_ORDER, UTILITY_COLS_ORDER, ALL_SCENARIOS
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -443,14 +443,19 @@ def build_sector_cluster_sites(cluster_sector_data: pl.DataFrame) -> Tuple[Dict,
     sector = cluster = None
 
     for row in cluster_sector_data.to_dicts():
-        sector = row.get("Sector").lower().replace('-', '_').replace(' ', '_')
-        cluster = row.get("Cluster").lower().replace('-', '_').replace(' ', '_')
-        utility = row.get("Utility").lower().replace('-', '_').replace(' ', '_')
-        flow_type = row.get("Flow type", "demand").lower()
+        raw_sector = row.get("Sector")
+        raw_cluster = row.get("Cluster")
+        raw_utility = row.get("Utility")
+        raw_flow_type = row.get("Flow type") or "demand"
         value = row.get("Value")
 
-        if not all([sector, cluster, utility, flow_type, value is not None]):
+        if not all([raw_sector, raw_cluster, raw_utility, raw_flow_type, value is not None]):
             continue
+
+        sector = raw_sector.lower().replace('-', '_').replace(' ', '_')
+        cluster = raw_cluster.lower().replace('-', '_').replace(' ', '_')
+        utility = raw_utility.lower().replace('-', '_').replace(' ', '_')
+        flow_type = raw_flow_type.lower()
 
         input_key = f'sector_site_{sector}' if cluster == 'cluster_6' else f'cluster_site_{sector}_{cluster}'
 
@@ -471,14 +476,19 @@ def build_sector_cluster_sites_EXTRA(cluster_sector_data: pl.DataFrame, mapping:
     mapping_subset = mapping.filter(pl.col('DSH plant id') == '1')
 
     for row in cluster_sector_data.to_dicts():
-        sector = row.get("Sector").lower().replace('-', '_').replace(' ', '_')
-        cluster = row.get("Cluster").lower().replace('-', '_').replace(' ', '_')
-        utility = row.get("Utility").lower().replace('-', '_').replace(' ', '_')
-        flow_type = row.get("Flow type", "demand").lower()
+        raw_sector = row.get("Sector")
+        raw_cluster = row.get("Cluster")
+        raw_utility = row.get("Utility")
+        raw_flow_type = row.get("Flow type") or "demand"
         value = row.get("Value")
 
-        if not all([sector, cluster, utility, flow_type, value is not None]):
+        if not all([raw_sector, raw_cluster, raw_utility, raw_flow_type, value is not None]):
             continue
+
+        sector = raw_sector.lower().replace('-', '_').replace(' ', '_')
+        cluster = raw_cluster.lower().replace('-', '_').replace(' ', '_')
+        utility = raw_utility.lower().replace('-', '_').replace(' ', '_')
+        flow_type = raw_flow_type.lower()
 
         result = mapping_subset.filter(
             (pl.col('Sector').str.to_lowercase() == sector) & (pl.col('Cluster').str.to_lowercase() == cluster)

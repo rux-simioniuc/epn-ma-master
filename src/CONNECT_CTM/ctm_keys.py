@@ -5,7 +5,7 @@ Peak-electricity ("LDSH") keys were removed: CTM no longer accepts
 peak-electricity as an input, so those builders and their callers are gone.
 """
 
-from .ctm_constants import CTM_ENERGY_COLUMN_MAP, CTM_EMISSION_COLUMN_MAP
+from .utils.ctm_constants import CTM_ENERGY_COLUMN_MAP, CTM_EMISSION_COLUMN_MAP
 
 
 # ═══════════════════════════════════════════════════════════════════════
