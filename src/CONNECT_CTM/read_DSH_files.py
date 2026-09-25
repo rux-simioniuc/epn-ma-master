@@ -1,0 +1,480 @@
+import polars as pl
+from openpyxl import load_workbook
+from pathlib import Path
+from typing import Tuple, IO
+from .utils.constants import CCU_CCS_COLS
+
+def normalize_column_name(name: str) -> str:
+    """
+    Normalize column names to match variations in Excel files.
+    Handles Dutch column names by mapping to English equivalents.
+    
+    E.g., "Electricity\n(peak)" -> "electricity_peak"
+         "CO₂ emissies scope 1\n(volg NEa richtlijn)" -> "co2"
+    """
+    if name is None:
+        return None
+    
+    name_str = str(name).strip()
+    
+    # Dutch -> English mapping (do this FIRST)
+    dutch_map = {
+        "CO₂ emissies scope 1\n(volg NEa richtlijn)": "CO2",
+        "CO₂ emissies scope 1\n(volg NEa richtlijn) ": "CO2",  # With trailing space
+        "Methaan scope 1\nemissies": "Methane",
+        "N₂O scope 1 emissies": "N2O",
+        "F-gassen scope 1\nemissies": "F-gases",
+    }
+    
+    # Check if exact match (with flexibility on whitespace)
+    for dutch, english in dutch_map.items():
+        if dutch.strip() in name_str or name_str in dutch.strip():
+            name_str = english
+            break
+    
+    # Then normalize as before
+    return (
+        name_str
+        .lower()
+        .replace("\n(peak)", "_peak")
+        .replace(" (", "_")
+        .replace(")", "")
+        .replace(" ", "_")
+        .replace("-", "_")
+        .replace("₂", "2")  # ← Handle subscript 2
+        .replace("₃", "3")  # ← Handle subscript 3
+    )
+ 
+def find_column_by_name(
+    worksheet,
+    header_row: int,
+    target_col: str,
+) -> int:
+    """
+    Find column index by normalized name matching.
+    Handles variations like "Electricity (peak)" vs "Electricity_peak"
+    
+    Returns:
+        column index (1-based) or None if not found
+    """
+    target_normalized = normalize_column_name(target_col)
+    
+    for col_idx in range(1, worksheet.max_column + 1):
+        header_val = worksheet.cell(header_row, col_idx).value
+        if header_val is None:
+            continue
+        
+        header_normalized = normalize_column_name(header_val)
+        if header_normalized == target_normalized:
+            return col_idx
+    
+    return None
+
+
+EXCEL_ERROR_VALUES = {
+    "#DIV/0!", "#N/A", "#NAME?", "#NULL!", "#NUM!",
+    "#REF!", "#VALUE!", "#GETTING_DATA", "#SPILL!",
+    "#CALC!", "#BLOCKED!", "#CONNECT!", "#FIELD!", "#UNKNOWN!",
+}
+
+
+def clean_cell_value(value):
+    """Convert Excel formula-error strings (e.g. '#REF!') to None."""
+    if isinstance(value, str) and value.strip().upper() in EXCEL_ERROR_VALUES:
+        return None
+    return value
+
+
+def read_scenario_sheet(
+    workbook_path: str,
+    sheet_name: str,
+    emission_cols: list[str],
+    energy_cols: list[str],
+    reference_year: int|str,
+) -> pl.DataFrame:
+    """
+    Read a Scenario X sheet created by write_scenario_sheets().
+ 
+    Returns a normalized dataframe with:
+        Scenario
+        Year
+        Flow type
+        <emission cols>
+        <energy cols>
+ 
+    - Skips the reference year
+    - Handles merged year cells
+    - Keeps rows even if all values are blank
+    - Ignores separator rows
+    - Dynamically finds column positions (handles variable column ordering)
+    - Matches column names with normalization (handles variations like "Electricity (peak)")
+    - Converts Excel formula errors (#REF!, #DIV/0!, etc.) to null instead of
+      leaving them as literal strings polluting numeric columns
+    """
+
+    wb = load_workbook(workbook_path, data_only=True)
+    ws = wb[sheet_name]
+
+    scenario = sheet_name.replace("Scenario ", "")
+
+    records = []
+    current_year = None
+    error_cells = []  # (row, col_name) pairs, for the summary warning below
+
+    # ── Find header row ────────────────────────────────────────────────
+    header_row = None
+
+    for row_idx in range(1, min(10, ws.max_row + 1)):
+        year_val = ws.cell(row_idx, 2).value
+        flow_val = ws.cell(row_idx, 3).value
+
+        if year_val == "Year" and flow_val == "Flow type":
+            header_row = row_idx
+            break
+
+    if header_row is None:
+        header_row = 3
+
+    # ── Find column indices for each requested column ───────────────────
+    year_col = 2
+    flow_type_col = 3
+
+    emission_indices = {}
+    for col in emission_cols:
+        col_idx = find_column_by_name(ws, header_row, col)
+        if col_idx:
+            emission_indices[col] = col_idx
+
+    energy_indices = {}
+    for col in energy_cols:
+        col_idx = find_column_by_name(ws, header_row, col)
+        if col_idx:
+            energy_indices[col] = col_idx
+
+    missing_energy = [c for c in energy_cols if c not in energy_indices]
+    if missing_energy:
+        available_cols = []
+        for col_idx in range(1, ws.max_column + 1):
+            header_val = ws.cell(header_row, col_idx).value
+            if header_val and str(header_val).strip() not in ["Year", "Flow type"]:
+                available_cols.append(str(header_val))
+
+        print(f"[WARN] {sheet_name}: missing or unmatched columns")
+        if missing_energy:
+            print(f"  Missing energy: {missing_energy}")
+        if available_cols:
+            print(f"  Available columns in Excel: {available_cols}")
+
+    # ── Read data rows ─────────────────────────────────────────────────
+    data_start = header_row + 1
+
+    for row_idx in range(data_start, ws.max_row + 1):
+
+        year_cell = clean_cell_value(ws.cell(row_idx, year_col).value)
+        if year_cell is not None:
+            current_year = str(year_cell)
+
+        flow_type = clean_cell_value(ws.cell(row_idx, flow_type_col).value)
+
+        if flow_type is None:
+            continue
+
+        if current_year == str(reference_year):
+            continue
+
+        record = {
+            "Scenario": scenario,
+            "Year": current_year,
+            "Flow type": str(flow_type).lower(),
+        }
+
+        for col, col_idx in emission_indices.items():
+            raw = ws.cell(row_idx, col_idx).value
+            record[col] = clean_cell_value(raw)
+            if isinstance(raw, str) and raw.strip().upper() in EXCEL_ERROR_VALUES:
+                error_cells.append((row_idx, col))
+
+        for col, col_idx in energy_indices.items():
+            raw = ws.cell(row_idx, col_idx).value
+            record[col] = clean_cell_value(raw)
+            if isinstance(raw, str) and raw.strip().upper() in EXCEL_ERROR_VALUES:
+                error_cells.append((row_idx, col))
+
+        records.append(record)
+
+    if error_cells:
+        print(f"[WARN] {sheet_name}: {len(error_cells)} formula error(s) found, treated as null:")
+        for row_idx, col in error_cells[:10]:
+            print(f"  Row {row_idx}, '{col}'")
+        if len(error_cells) > 10:
+            print(f"  ... and {len(error_cells) - 10} more")
+
+    if not records:
+        return pl.DataFrame(
+            schema={
+                "Scenario": pl.Utf8,
+                "Year": pl.Utf8,
+                "Flow type": pl.Utf8,
+                **{c: pl.Float64 for c in emission_cols},
+                **{c: pl.Float64 for c in energy_cols},
+            }
+        )
+
+    return pl.DataFrame(records)
+ 
+ 
+def aggregate_scenarios_flow_types(all_df: pl.DataFrame) -> pl.DataFrame:
+    value_cols = [c for c in all_df.columns if c not in ('Scenario', 'Year', 'Flow type')]
+    ccu_ccs_cols = [c for c in CCU_CCS_COLS if c in value_cols]
+
+    production = all_df.filter(pl.col('Flow type') == 'production')
+    supply = all_df.filter(pl.col('Flow type') == 'supply')
+
+    demand = (
+        all_df.filter(pl.col('Flow type').is_in(['demand', 'captive use']))
+        .group_by(['Scenario', 'Year'])
+        .agg([pl.col(c).sum() for c in value_cols])
+        .with_columns(pl.lit('demand').alias('Flow type'))
+        .select(all_df.columns)
+    )
+
+    if ccu_ccs_cols and not supply.is_empty():
+        # CCU/CCS supply folds into production; every other supply value
+        # (and any other flow type not explicitly handled above) vanishes.
+        supply_ccu = supply.select(['Scenario', 'Year'] + ccu_ccs_cols)
+
+        # full join: handles both "supply row exists but no production row
+        # yet for this scenario/year" and the normal matching case
+        production = production.join(
+            supply_ccu, on=['Scenario', 'Year'], how='full', coalesce=True, suffix='_supply'
+        ).with_columns(pl.lit('production').alias('Flow type'))
+
+        for col in ccu_ccs_cols:
+            production = production.with_columns(
+                (pl.col(col).fill_null(0) + pl.col(f'{col}_supply').fill_null(0)).alias(col)
+            )
+        production = production.drop([f'{col}_supply' for col in ccu_ccs_cols]).select(all_df.columns)
+
+    return pl.concat([production, demand])
+ 
+ 
+def read_all_scenario_sheets(
+    workbook_path: str,
+    emission_cols: list[str],
+    energy_cols: list[str],
+    reference_year: int|str,
+    aggregate_flow_types:bool = True
+) -> pl.DataFrame:
+    """
+    Read all Scenario X sheets and return a single dataframe.
+    """
+    wb = load_workbook(workbook_path, read_only=True)   
+ 
+    scenario_sheets = [
+        sheet
+        for sheet in wb.sheetnames
+        if sheet.startswith("Scenario ")
+    ]
+
+    wb.close()
+ 
+    dfs = [
+        read_scenario_sheet(
+            workbook_path=workbook_path,
+            sheet_name=sheet,
+            emission_cols=emission_cols,
+            energy_cols=energy_cols,
+            reference_year=reference_year,
+        )
+        for sheet in scenario_sheets
+    ]
+
+    if not dfs:
+        return pl.DataFrame()
+    
+    if aggregate_flow_types:
+        all_df = pl.concat(dfs, how="vertical_relaxed")
+        return aggregate_scenarios_flow_types(all_df)
+
+    return pl.concat(dfs, how="vertical_relaxed")
+ 
+ 
+def save_scenario_values(
+    workbook_path: str,
+    plant_name: str,
+    output_dir: str,
+    emission_cols: list[str],
+    energy_cols: list[str],
+    reference_year: int|str,
+) -> str:
+ 
+    df = read_all_scenario_sheets(
+        workbook_path=workbook_path,
+        emission_cols=emission_cols,
+        energy_cols=energy_cols,
+        reference_year=reference_year,
+    )
+ 
+    path = (
+        Path(output_dir)
+        / f"{plant_name}_scenario_values.parquet"
+    )
+ 
+    df.write_parquet(path)
+ 
+    return str(path)
+ 
+ 
+def read_production_table(
+    workbook_path: str | bytes | IO, # can be either string either UploadedFile from streamlit
+    sheet_name: str = "Production",
+) -> Tuple[pl.DataFrame, pl.DataFrame]:
+    # Read entire sheet without assuming a header
+    try:
+        raw = pl.read_excel(
+            workbook_path,
+            sheet_name=sheet_name,
+            has_header=True,
+        )
+    except Exception as e:
+        print(f"[WARN] Sheet '{sheet_name}' not found or unreadable: {e} for {workbook_path.name}")
+        return pl.DataFrame(), pl.DataFrame()
+    # edge case - no capacity / flh / efficiency table
+    if len(raw) <= 1:
+        return pl.DataFrame(), pl.DataFrame()
+ 
+    # Find row containing the table header
+    header_row = (
+        raw.with_row_index()
+        .filter(
+            (pl.col("Name") == "Scenario")
+            & (pl.col("Year") == "Year")
+        )
+        .select("index")
+        .item()
+    )
+ 
+    # Extract header values
+    header_values = raw.row(header_row)
+ 
+    # Keep columns until first null header
+    n_cols = next(
+        (i for i, v in enumerate(header_values) if v is None),
+        len(header_values)
+    )
+ 
+    headers = [str(v) for v in header_values[:n_cols]]
+
+    init_prod = raw.slice(0, header_row)
+ 
+    # Data below header
+    data = raw.slice(header_row + 1)
+ 
+    # Keep only relevant columns
+    data = data.select(data.columns[:n_cols])
+ 
+    # Rename columns
+    data.columns = headers
+ 
+     # Stop at first completely empty row.
+    # Excel empty cells can be either null or "".
+    empty_mask = pl.all_horizontal(
+        [
+            pl.col(c).is_null() | (pl.col(c) == "")
+            for c in data.columns
+        ]
+    )
+
+    empty_rows = (
+        data.with_row_index()
+        .filter(empty_mask)
+        .select("index")
+    )
+
+    if empty_rows.height > 0:
+        data = data.slice(0, empty_rows.item())
+
+    empty_idx = next(
+        (
+            i
+            for i, row in enumerate(data.iter_rows())
+            if all(value is None or value == "" for value in row)
+        ),
+        None,
+    )
+
+    if empty_idx is not None:
+        data = data.slice(0, empty_idx)
+
+
+    if 'Units' not in data.columns:
+        print(f'[WARN] "Units" column not found in production table for {workbook_path.name}. Using first found generation unit.')
+        data = data.with_columns(pl.lit(init_prod.select('Name').head(1).item()).alias('Units'))
+ 
+    return (data, init_prod)
+ 
+ 
+def save_production_values(
+    workbook_path: str,
+    plant_name: str,
+    output_dir: str,
+) -> str:
+ 
+    df  = read_production_table(
+        workbook_path,
+        sheet_name="Production",
+    )[0]
+ 
+    path = (
+        Path(output_dir)
+        / f"{plant_name}_flh_production.parquet"
+    )
+ 
+    df.write_parquet(path)
+ 
+    return str(path)
+ 
+
+def read_production_table_curves(
+        workbook_path:str=None,
+        curves_df: pl.DataFrame = None,
+        sheet_name:str = None
+        ) -> pl.DataFrame:
+
+    if workbook_path is not None:
+        df =  pl.read_excel(workbook_path, sheet_name=sheet_name)
+    else:
+        df = curves_df
+    
+    df = df.rename(str.capitalize)
+    df = df.rename({'Flh':'FLH'})
+    df = df.with_columns(pl.col("Year").cast(pl.String))
+    df = df.with_columns(pl.col('Cluster').str.to_lowercase().replace('overig', 'Cluster 6').alias('Cluster'))
+
+    return df
+
+
+def read_plant_details(workbook_path: str) -> dict:
+    """
+    Read plant details sheet and extract latitude, longitude.
+    
+    Returns:
+        {"Latitude": float, "Longitude": float}
+    """
+    wb = load_workbook(workbook_path, data_only=True)
+    ws = wb["Plant details"]  # or whatever the sheet is called
+    
+    details = {}
+    
+    # Find the cells with Latitude and Longitude (scan first few rows)
+    for row_idx in range(1, 20):
+        for col_idx in range(1, 10):
+            cell_val = ws.cell(row_idx, col_idx).value
+            if cell_val == "Breedtegraad":
+                value = ws.cell(row_idx, col_idx + 1).value
+                details["Latitude"] = "" if value is None else value
+            elif cell_val == "Lengtegraad":
+                value = ws.cell(row_idx, col_idx + 1).value
+                details["Longitude"] = "" if value is None else value
+    
+    return details
