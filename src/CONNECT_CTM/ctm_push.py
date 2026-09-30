@@ -869,11 +869,11 @@ def push_aggregated_by_scenario_year(
             log_message("STEP 1B: Loading and reshaping cluster/sector curves...")
             if isinstance(cluster_sector_file, str):
                 cluster_sector_df_long_init = get_final_cluster_sector_curves(
-                    excel_path=cluster_sector_file, sheet_name=cluster_sector_curves_sheet_name, years=SCENARIO_YEARS,
+                    excel_path=cluster_sector_file, sheet_name=cluster_sector_curves_sheet_name, years=selected_years,
                 )
             else:
                 cluster_sector_df_long_init = get_final_cluster_sector_curves(
-                    curves_df=cluster_sector_file, years=SCENARIO_YEARS,
+                    curves_df=cluster_sector_file, years=selected_years,
                 )
 
             cluster_sector_df_long = cluster_sector_df_long_init.filter(~pl.col('Sector').is_in(['refineries', 'steel']))
